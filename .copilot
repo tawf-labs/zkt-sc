@@ -1,0 +1,1032 @@
+# ZKT Community DAO - Implementation Documentation
+
+**Date:** November 24, 2025  
+**Network:** Base Sepolia Testnet  
+**Status:** Initial Implementation Complete
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [Smart Contracts](#smart-contracts)
+4. [Proposal Flow](#proposal-flow)
+5. [Roles & Access Control](#roles--access-control)
+6. [Mock ZK-SNARK Implementation](#mock-zk-snark-implementation)
+7. [Deployment Guide](#deployment-guide)
+8. [Testing](#testing)
+9. [Future Enhancements](#future-enhancements)
+10. [Contract Addresses](#contract-addresses)
+
+---
+
+## Overview
+
+The ZKT Community DAO is a decentralized governance system designed for managing Zakat (Islamic charitable giving) and general donation campaigns. The system implements a multi-stage approval process:
+
+1. **Organizers** create proposals with optional Zakat compliance checklists
+2. **KYC verification** (or emergency bypass with admin approval)
+3. **Community voting** with quorum and threshold requirements
+4. **Automated bundling** of passed proposals
+5. **Sharia Council review** with multi-signature quorum for Zakat compliance verification
+6. **Campaign pool creation** for approved proposals
+7. **Donor contributions** with SBT (Soulbound Token) rewards
+8. **Fund withdrawal** by organizers after goal achievement
+
+### Key Features
+
+- ✅ **Role-based access control** (Organizer, Community Member, Sharia Council, Admin, KYC Oracle)
+- ✅ **Mock ZK-SNARK proofs** for KYC and Sharia review (placeholder for future integration)
+- ✅ **IDRX token** (Mock Indonesian Rupiah) with faucet for testnet
+- ✅ **Non-transferable SBTs** proving donor contributions
+- ✅ **Automated bundling** based on threshold or time
+- ✅ **Multi-sig Sharia council** with on-chain quorum
+- ✅ **Emergency bypass** for urgent campaigns (requires admin approval)
+- ✅ **Gas-optimized** storage and execution
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        ZKT DAO ECOSYSTEM                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌──────────────┐      ┌──────────────┐     ┌──────────────┐
+│  MockIDRX    │      │   SBTToken   │     │ CommunityDAO │
+│  (ERC20)     │◄─────┤   (ERC721)   │◄────┤   (Core)     │
+└──────────────┘      └──────────────┘     └──────────────┘
+  - Faucet            - Non-transferable    - Governance
+  - Admin mint        - Donation metadata   - Voting
+  - 24h cooldown      - On-chain JSON       - Bundling
+                                            - Sharia review
+                                            - Fundraising
+```
+
+### Data Flow
+
+```
+┌──────────────┐
+│  Organizer   │
+└──────┬───────┘
+       │ 1. createProposal(title, goal, mockZKKYCProof, ...)
+       ▼
+┌──────────────────────┐
+│  Draft Proposal      │
+│  - KYC Pending       │
+└──────┬───────────────┘
+       │ 2. Admin: updateKYCStatus(Verified)
+       ▼
+┌──────────────────────┐
+│  submitForVote()     │
+└──────┬───────────────┘
+       │ 3. Community members vote (For/Against/Abstain)
+       ▼
+┌──────────────────────┐
+│  finalizeCommunityVote()
+│  - Check quorum      │
+│  - Check threshold   │
+└──────┬───────────────┘
+       │ 4. If passed → CommunityPassed
+       ▼
+┌──────────────────────┐
+│ Automated Bundling   │
+│ - Threshold: 5       │
+│ - Time: 7 days       │
+└──────┬───────────────┘
+       │ 5. createShariaReviewBundle()
+       ▼
+┌──────────────────────┐
+│  Sharia Review       │
+│  - Multi-sig (3/5)   │
+│  - mockZKReviewProof │
+└──────┬───────────────┘
+       │ 6. reviewProposal() + finalizeShariaBundle()
+       ▼
+┌──────────────────────┐
+│  ShariaApproved      │
+│  + CampaignType      │
+└──────┬───────────────┘
+       │ 7. createCampaignPool()
+       ▼
+┌──────────────────────┐
+│  Pool Created        │
+│  - Donors contribute │
+│  - SBTs minted       │
+└──────┬───────────────┘
+       │ 8. withdrawFunds() when goal reached
+       ▼
+┌──────────────────────┐
+│  Completed           │
+└──────────────────────┘
+```
+
+---
+
+## Smart Contracts
+
+### 1. MockIDRX.sol
+
+**Purpose:** Testnet-only ERC20 token representing Indonesian Rupiah.
+
+**Key Functions:**
+- `faucet()` - Claim 1000 IDRX (24h cooldown)
+- `adminMint(address, uint256)` - Admin can mint tokens
+- `timeUntilNextClaim(address)` - Check faucet cooldown
+- `canClaimFaucet(address)` - Check if user can claim
+
+**Features:**
+- 18 decimals (standard ERC20)
+- 1M IDRX minted to deployer initially
+- Faucet cooldown tracked per address
+- Admin role for minting
+
+**Security:**
+- AccessControl for admin functions
+- Cooldown enforcement prevents spam
+- Zero address checks
+
+---
+
+### 2. SBTToken.sol
+
+**Purpose:** Non-transferable NFT (Soulbound Token) proving donor contributions.
+
+**Key Functions:**
+- `mint(address, poolId, amount, campaignType)` - Mint new SBT (MINTER_ROLE only)
+- `updateDonation(donor, poolId, amount)` - Update SBT on additional donations
+- `burn(tokenId, reason)` - Admin can revoke SBT (e.g., fraud)
+- `getTokenIdForDonorAndPool(donor, poolId)` - Retrieve donor's SBT
+
+**Features:**
+- On-chain JSON metadata (Base64-encoded)
+- Metadata includes: Pool ID, Campaign Type, Total Donated, Mint timestamp
+- One SBT per donor per pool
+- Non-transferable (except mint/burn)
+- ERC721URIStorage for metadata
+
+**Metadata Example:**
+```json
+{
+  "name": "ZKT Donation SBT #1",
+  "description": "Soulbound token proving contribution to ZKT campaign pool #1",
+  "image": "ipfs://QmZKTDonationBadge",
+  "attributes": [
+    {"trait_type": "Pool ID", "value": "1"},
+    {"trait_type": "Campaign Type", "value": "Zakat"},
+    {"trait_type": "Total Donated", "value": "500 IDRX"},
+    {"trait_type": "Minted At", "value": "1732492800"},
+    {"trait_type": "Status", "value": "Active"}
+  ]
+}
+```
+
+**Security:**
+- `_update()` override blocks transfers
+- Only MINTER_ROLE (DAO contract) can mint
+- Admin can burn with reason (auditable)
+
+---
+
+### 3. CommunityDAO.sol
+
+**Purpose:** Core governance contract for proposal lifecycle management.
+
+**Key Structs:**
+
+```solidity
+struct Proposal {
+    uint256 proposalId;
+    address organizer;
+    string title;
+    string description;
+    uint256 fundingGoal;
+    KYCStatus kycStatus;           // NotRequired, Pending, Verified, Rejected
+    bool isEmergency;
+    bytes32 mockZKKYCProof;        // Mock ZK proof hash
+    string kycNotes;               // Admin notes for future integration
+    uint256 createdAt;
+    uint256 communityVoteStart;
+    uint256 communityVoteEnd;
+    uint256 votesFor;
+    uint256 votesAgainst;
+    uint256 votesAbstain;
+    ProposalStatus status;         // Draft, CommunityVote, Passed, etc.
+    CampaignType campaignType;     // Normal, ZakatCompliant
+    uint256 poolId;
+    string[] zakatChecklistItems;
+}
+
+struct ShariaReviewBundle {
+    uint256 bundleId;
+    uint256[] proposalIds;
+    uint256 submittedAt;
+    bool finalized;
+    uint256 approvalCount;
+}
+
+struct CampaignPool {
+    uint256 poolId;
+    uint256 proposalId;
+    address organizer;
+    uint256 fundingGoal;
+    uint256 raisedAmount;
+    CampaignType campaignType;
+    bool isActive;
+    uint256 createdAt;
+    address[] donors;
+    bool fundsWithdrawn;
+}
+```
+
+**Key Functions:**
+
+| Function | Role | Description |
+|----------|------|-------------|
+| `createProposal(...)` | Organizer | Create new campaign proposal |
+| `updateKYCStatus(...)` | Admin/Oracle | Update KYC verification status |
+| `submitForCommunityVote(...)` | Organizer/Admin | Submit proposal for voting |
+| `castVote(proposalId, support)` | Community Member | Vote on active proposals |
+| `finalizeCommunityVote(...)` | Public | Finalize vote after period ends |
+| `checkAndCreateBundle()` | Public | Trigger automated bundling |
+| `createShariaReviewBundle(...)` | Admin | Manually create bundle |
+| `reviewProposal(...)` | Sharia Council | Submit review with mock ZK proof |
+| `finalizeShariaBundle(...)` | Sharia Council | Finalize bundle with quorum |
+| `createCampaignPool(...)` | Admin | Create fundraising pool |
+| `donate(poolId, amount)` | Public | Donate IDRX to pool |
+| `withdrawFunds(poolId)` | Organizer | Withdraw raised funds |
+| `cancelProposal(...)` | Organizer/Admin | Cancel proposal before pool created |
+
+**Governance Parameters:**
+- `votingPeriod` = 7 days (configurable)
+- `quorumPercentage` = 10% (configurable)
+- `passThreshold` = 51% (configurable)
+- `BUNDLE_THRESHOLD` = 5 proposals (constant)
+- `BUNDLE_TIME_THRESHOLD` = 7 days (constant)
+- `shariaQuorumRequired` = 3 signatures (configurable)
+
+**Security:**
+- ReentrancyGuard on `donate()` and `withdrawFunds()`
+- Role-based access control on all state-changing functions
+- Quorum and threshold validation
+- Status checks prevent invalid state transitions
+- KYC verification required (unless emergency)
+
+---
+
+## Proposal Flow
+
+### Phase 1: Proposal Creation
+
+```solidity
+// Organizer creates proposal
+uint256 proposalId = dao.createProposal(
+    "Build School in Village X",
+    "Detailed description...",
+    1000 * 10**18,              // 1000 IDRX goal
+    false,                       // Not emergency
+    keccak256("mock_kyc_proof"), // Mock ZK proof
+    ["Item 1", "Item 2"]         // Zakat checklist
+);
+// Status: Draft, KYCStatus: Pending
+```
+
+### Phase 2: KYC Verification
+
+```solidity
+// Admin or Oracle verifies KYC
+dao.updateKYCStatus(
+    proposalId,
+    KYCStatus.Verified,
+    "Verified via third-party provider on 2025-11-24"
+);
+```
+
+**For Emergency Proposals:**
+```solidity
+// Emergency bypass (no KYC required)
+uint256 emergencyId = dao.createProposal(
+    "Flood Relief",
+    "Urgent aid needed",
+    500 * 10**18,
+    true,  // isEmergency = true
+    bytes32(0),
+    new string[](0)
+);
+// Status: Draft, KYCStatus: NotRequired
+```
+
+### Phase 3: Community Voting
+
+```solidity
+// Organizer submits for vote
+dao.submitForCommunityVote(proposalId);
+// Status: CommunityVote
+
+// Members vote
+dao.castVote(proposalId, 1); // 1 = For, 0 = Against, 2 = Abstain
+
+// After voting period (7 days)
+dao.finalizeCommunityVote(proposalId);
+// If passed: Status = CommunityPassed
+// If failed: Status = CommunityRejected
+```
+
+**Quorum & Threshold:**
+- Quorum: 10% of `totalCommunityMembers` must vote
+- Pass threshold: 51% of (For + Against) must be For
+
+### Phase 4: Automated Bundling
+
+Bundling triggers when:
+1. **5 or more** proposals have passed community vote, OR
+2. **7 days** have elapsed since last bundle
+
+```solidity
+// Anyone can trigger check
+dao.checkAndCreateBundle();
+// Creates ShariaReviewBundle with all CommunityPassed proposals
+// Status: CommunityPassed → ShariaReview
+```
+
+### Phase 5: Sharia Council Review
+
+```solidity
+// Each council member reviews proposals in bundle
+dao.reviewProposal(
+    bundleId,
+    proposalId,
+    true,                             // Approved
+    CampaignType.ZakatCompliant,      // Zakat-eligible
+    keccak256("sharia_review_proof")  // Mock ZK proof
+);
+
+// After quorum reached (3/5), finalize
+dao.finalizeShariaBundle(bundleId);
+// If approved: Status = ShariaApproved, campaignType set
+// If rejected: Status = ShariaRejected
+```
+
+### Phase 6: Pool Creation & Fundraising
+
+```solidity
+// Admin creates pool
+uint256 poolId = dao.createCampaignPool(proposalId);
+// Status: PoolCreated
+
+// Donors contribute
+idrxToken.approve(address(dao), 500 * 10**18);
+dao.donate(poolId, 500 * 10**18);
+// - IDRX transferred to DAO
+// - SBT minted to donor (first donation) or updated (subsequent)
+
+// When goal reached, organizer withdraws
+dao.withdrawFunds(poolId);
+// Status: Completed
+// Funds transferred to organizer
+```
+
+---
+
+## Roles & Access Control
+
+### Role Definitions
+
+| Role | Responsibilities | Grant Method |
+|------|------------------|--------------|
+| **DEFAULT_ADMIN_ROLE** | Grant/revoke all roles | Deployer initially |
+| **ADMIN_ROLE** | Governance params, pool creation, bundling | `dao.grantRole(ADMIN_ROLE, address)` |
+| **ORGANIZER_ROLE** | Create proposals, submit for vote | `dao.grantRole(ORGANIZER_ROLE, address)` |
+| **COMMUNITY_MEMBER_ROLE** | Vote on proposals | `dao.grantRole(COMMUNITY_MEMBER_ROLE, address)` |
+| **SHARIA_COUNCIL_ROLE** | Review proposals, assign campaign type | `dao.grantRole(SHARIA_COUNCIL_ROLE, address)` |
+| **KYC_ORACLE_ROLE** | Update KYC status | `dao.grantRole(KYC_ORACLE_ROLE, address)` |
+| **MINTER_ROLE** (SBT) | Mint SBTs (granted to DAO contract) | `sbtToken.grantRole(MINTER_ROLE, dao)` |
+
+### Access Control Matrix
+
+| Function | Organizer | Member | Sharia | Admin | Oracle | Public |
+|----------|-----------|--------|--------|-------|--------|--------|
+| createProposal | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| submitForVote | ✅ (own) | ❌ | ❌ | ✅ | ❌ | ❌ |
+| castVote | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| finalizeCommunityVote | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| checkAndCreateBundle | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| createShariaReviewBundle | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| reviewProposal | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| finalizeShariaBundle | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| createCampaignPool | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| donate | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| withdrawFunds | ✅ (own) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| updateKYCStatus | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| cancelProposal | ✅ (own) | ❌ | ❌ | ✅ | ❌ | ❌ |
+
+---
+
+## Mock ZK-SNARK Implementation
+
+### Current Implementation (MVP)
+
+The system uses **placeholder `bytes32` hashes** to simulate ZK-SNARK proofs:
+
+```solidity
+// In Proposal struct
+bytes32 mockZKKYCProof;  // Simulated ZK proof for KYC
+
+// In CommunityDAO
+mapping(uint256 => mapping(uint256 => bytes32)) public shariaReviewProofs;
+```
+
+**How it works:**
+1. Organizer provides `keccak256("mock_kyc_data")` when creating proposal
+2. Admin stores proof hash when updating KYC status
+3. Sharia council provides `keccak256("sharia_review_data")` when reviewing
+4. System stores but **does NOT verify** these proofs (verification deferred to future integration)
+
+### Future Integration Plan
+
+**Replace with real zkSNARKs:**
+
+1. **KYC Verification:**
+   - Integrate **Polygon ID** or **Worldcoin** for privacy-preserving identity
+   - User generates ZK proof: "I am KYC-verified without revealing identity"
+   - DAO contract verifies proof on-chain using Groth16 verifier
+   
+   ```solidity
+   // Future implementation
+   IZKVerifier public kycVerifier;
+   
+   function updateKYCStatus(
+       uint256 proposalId,
+       uint256[2] memory a,
+       uint256[2][2] memory b,
+       uint256[2] memory c,
+       uint256[1] memory input
+   ) external {
+       require(kycVerifier.verifyProof(a, b, c, input), "Invalid ZK proof");
+       // Update KYC status
+   }
+   ```
+
+2. **Sharia Council Review:**
+   - Council generates ZK proof: "I reviewed proposal X and approve/reject"
+   - Proof includes commitment to review decision
+   - On-chain verification ensures authenticity
+   
+3. **Benefits:**
+   - Privacy: KYC data never on-chain
+   - Security: Cryptographic proof of verification
+   - Auditability: Proof hashes stored for transparency
+
+**Code markers for future work:**
+```solidity
+// Search for these comments in codebase:
+// TODO: Replace with zkSNARK verifier
+// Future: integrate Polygon ID zkKYC or Worldcoin verification
+```
+
+---
+
+## Deployment Guide
+
+### Prerequisites
+
+1. **Install Foundry:**
+   ```bash
+   curl -L https://foundry.paradigm.xyz | bash
+   foundryup
+   ```
+
+2. **Get Base Sepolia ETH:**
+   - Visit https://www.coinbase.com/faucets/base-ethereum-goerli-faucet
+   - Or use Alchemy faucet: https://www.alchemy.com/faucets/base-sepolia
+
+3. **Get Basescan API Key:**
+   - Visit https://basescan.org/
+   - Register and get API key for verification
+
+### Step 1: Configure Environment
+
+```bash
+cd sc
+cp .env.example .env
+# Edit .env with your private key and Basescan API key
+```
+
+**.env:**
+```bash
+BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
+PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HERE
+BASESCAN_API_KEY=YOUR_BASESCAN_API_KEY
+```
+
+### Step 2: Build Contracts
+
+```bash
+forge build
+```
+
+**Expected output:**
+```
+[⠢] Compiling...
+[⠆] Compiling 3 files with 0.8.20
+[⠰] Solc 0.8.20 finished in 2.5s
+Compiler run successful!
+```
+
+### Step 3: Run Tests
+
+```bash
+forge test -vv
+```
+
+**Expected tests to pass:**
+- `testCreateProposal`
+- `testEmergencyProposal`
+- `testKYCUpdate`
+- `testCommunityVoteFlow`
+- `testShariaReviewFlow`
+- `testFullDonationFlow`
+- `testFaucet`
+- `testSBTNonTransferable`
+
+### Step 4: Deploy to Base Sepolia
+
+```bash
+forge script script/DeployDAO.s.sol:DeployDAO \
+  --rpc-url base_sepolia \
+  --broadcast \
+  --verify \
+  -vvvv
+```
+
+**Deployment steps performed:**
+1. Deploy MockIDRX
+2. Deploy SBTToken
+3. Deploy CommunityDAO
+4. Grant MINTER_ROLE to DAO
+5. Setup initial roles
+6. Set totalCommunityMembers = 10
+
+**Expected output:**
+```
+== Logs ==
+Deploying contracts with account: 0xYourAddress
+Account balance: 100000000000000000
+
+1. Deploying MockIDRX token...
+MockIDRX deployed at: 0x...
+
+2. Deploying SBTToken...
+SBTToken deployed at: 0x...
+
+3. Deploying CommunityDAO...
+CommunityDAO deployed at: 0x...
+
+4. Granting MINTER_ROLE to DAO...
+MINTER_ROLE granted to DAO
+
+5. Setting up initial roles...
+Initial roles granted to deployer
+
+6. Setting initial community members count...
+Total community members set to 10
+
+====== DEPLOYMENT SUMMARY ======
+Network: Base Sepolia
+Deployer: 0xYourAddress
+
+Contract Addresses:
+MockIDRX: 0x...
+SBTToken: 0x...
+CommunityDAO: 0x...
+```
+
+### Step 5: Verify Contracts
+
+If `--verify` flag didn't work, manually verify:
+
+```bash
+forge verify-contract \
+  0xYOUR_IDRX_ADDRESS \
+  src/tokens/MockIDRX.sol:MockIDRX \
+  --chain base-sepolia \
+  --etherscan-api-key $BASESCAN_API_KEY
+
+forge verify-contract \
+  0xYOUR_SBT_ADDRESS \
+  src/tokens/SBTToken.sol:SBTToken \
+  --chain base-sepolia \
+  --etherscan-api-key $BASESCAN_API_KEY
+
+forge verify-contract \
+  0xYOUR_DAO_ADDRESS \
+  src/DAO/CommunityDAO.sol:CommunityDAO \
+  --chain base-sepolia \
+  --constructor-args $(cast abi-encode "constructor(address,address)" 0xIDRX_ADDRESS 0xSBT_ADDRESS) \
+  --etherscan-api-key $BASESCAN_API_KEY
+```
+
+### Step 6: Post-Deployment Setup
+
+1. **Grant roles to real users:**
+   ```bash
+   # Grant organizer role
+   cast send $DAO_ADDRESS \
+     "grantRole(bytes32,address)" \
+     $(cast keccak "ORGANIZER_ROLE") \
+     0xOrganizerAddress \
+     --rpc-url base_sepolia \
+     --private-key $PRIVATE_KEY
+   
+   # Grant community member role
+   cast send $DAO_ADDRESS \
+     "grantRole(bytes32,address)" \
+     $(cast keccak "COMMUNITY_MEMBER_ROLE") \
+     0xMemberAddress \
+     --rpc-url base_sepolia \
+     --private-key $PRIVATE_KEY
+   
+   # Grant Sharia council role
+   cast send $DAO_ADDRESS \
+     "grantRole(bytes32,address)" \
+     $(cast keccak "SHARIA_COUNCIL_ROLE") \
+     0xCouncilAddress \
+     --rpc-url base_sepolia \
+     --private-key $PRIVATE_KEY
+   ```
+
+2. **Update community members count:**
+   ```bash
+   cast send $DAO_ADDRESS \
+     "setTotalCommunityMembers(uint256)" \
+     100 \
+     --rpc-url base_sepolia \
+     --private-key $PRIVATE_KEY
+   ```
+
+3. **Test faucet:**
+   ```bash
+   cast send $IDRX_ADDRESS \
+     "faucet()" \
+     --rpc-url base_sepolia \
+     --private-key $PRIVATE_KEY
+   ```
+
+---
+
+## Testing
+
+### Local Testing with Forge
+
+```bash
+# Run all tests
+forge test
+
+# Run with verbose output
+forge test -vv
+
+# Run specific test
+forge test --match-test testFullDonationFlow -vvv
+
+# Run with gas report
+forge test --gas-report
+
+# Run with coverage
+forge coverage
+```
+
+### Test Coverage
+
+The test suite covers:
+- ✅ Proposal creation (normal and emergency)
+- ✅ KYC verification flow
+- ✅ Community voting (quorum, threshold)
+- ✅ Automated bundling
+- ✅ Sharia council review
+- ✅ Campaign pool creation
+- ✅ Donation flow
+- ✅ SBT minting and updates
+- ✅ Fund withdrawal
+- ✅ Faucet functionality
+- ✅ SBT non-transferability
+
+### Integration Testing on Base Sepolia
+
+**End-to-end test scenario:**
+
+1. **Claim IDRX from faucet:**
+   ```bash
+   cast send $IDRX_ADDRESS "faucet()" --rpc-url base_sepolia --private-key $PRIVATE_KEY
+   ```
+
+2. **Create proposal:**
+   ```bash
+   cast send $DAO_ADDRESS \
+     "createProposal(string,string,uint256,bool,bytes32,string[])" \
+     "School Project" \
+     "Build school in rural area" \
+     "1000000000000000000000" \
+     false \
+     $(cast keccak "mock_kyc_proof") \
+     "[]" \
+     --rpc-url base_sepolia \
+     --private-key $ORGANIZER_KEY
+   ```
+
+3. **Update KYC:**
+   ```bash
+   cast send $DAO_ADDRESS \
+     "updateKYCStatus(uint256,uint8,string)" \
+     1 \
+     2 \
+     "Verified" \
+     --rpc-url base_sepolia \
+     --private-key $ADMIN_KEY
+   ```
+
+4. **Submit for vote:**
+   ```bash
+   cast send $DAO_ADDRESS \
+     "submitForCommunityVote(uint256)" \
+     1 \
+     --rpc-url base_sepolia \
+     --private-key $ORGANIZER_KEY
+   ```
+
+5. **Cast votes:**
+   ```bash
+   # Member 1 votes For
+   cast send $DAO_ADDRESS \
+     "castVote(uint256,uint8)" \
+     1 1 \
+     --rpc-url base_sepolia \
+     --private-key $MEMBER1_KEY
+   ```
+
+6. **Wait 7 days** (or use `vm.warp` in tests)
+
+7. **Finalize vote:**
+   ```bash
+   cast send $DAO_ADDRESS \
+     "finalizeCommunityVote(uint256)" \
+     1 \
+     --rpc-url base_sepolia \
+     --private-key $ANYONE_KEY
+   ```
+
+8. **Create bundle (automatic or manual):**
+   ```bash
+   cast send $DAO_ADDRESS \
+     "checkAndCreateBundle()" \
+     --rpc-url base_sepolia \
+     --private-key $ANYONE_KEY
+   ```
+
+9. **Sharia review:**
+   ```bash
+   cast send $DAO_ADDRESS \
+     "reviewProposal(uint256,uint256,bool,uint8,bytes32)" \
+     1 1 true 1 $(cast keccak "review_proof") \
+     --rpc-url base_sepolia \
+     --private-key $COUNCIL1_KEY
+   ```
+
+10. **Finalize bundle:**
+    ```bash
+    cast send $DAO_ADDRESS \
+      "finalizeShariaBundle(uint256)" \
+      1 \
+      --rpc-url base_sepolia \
+      --private-key $COUNCIL1_KEY
+    ```
+
+11. **Create pool:**
+    ```bash
+    cast send $DAO_ADDRESS \
+      "createCampaignPool(uint256)" \
+      1 \
+      --rpc-url base_sepolia \
+      --private-key $ADMIN_KEY
+    ```
+
+12. **Donate:**
+    ```bash
+    # Approve IDRX
+    cast send $IDRX_ADDRESS \
+      "approve(address,uint256)" \
+      $DAO_ADDRESS \
+      "500000000000000000000" \
+      --rpc-url base_sepolia \
+      --private-key $DONOR_KEY
+    
+    # Donate
+    cast send $DAO_ADDRESS \
+      "donate(uint256,uint256)" \
+      1 \
+      "500000000000000000000" \
+      --rpc-url base_sepolia \
+      --private-key $DONOR_KEY
+    ```
+
+13. **Check SBT:**
+    ```bash
+    cast call $SBT_ADDRESS \
+      "getTokenIdForDonorAndPool(address,uint256)" \
+      $DONOR_ADDRESS 1 \
+      --rpc-url base_sepolia
+    ```
+
+14. **Withdraw funds:**
+    ```bash
+    cast send $DAO_ADDRESS \
+      "withdrawFunds(uint256)" \
+      1 \
+      --rpc-url base_sepolia \
+      --private-key $ORGANIZER_KEY
+    ```
+
+---
+
+## Future Enhancements
+
+### Phase 1: Production Readiness (Q1 2026)
+
+1. **Real zkSNARK Integration**
+   - [ ] Integrate Polygon ID for KYC verification
+   - [ ] Generate and verify Groth16 proofs on-chain
+   - [ ] Privacy-preserving identity attestation
+   - [ ] Benchmark gas costs vs current implementation
+
+2. **Third-Party KYC Provider**
+   - [ ] Integrate with Synaps, Persona, or Onfido
+   - [ ] Off-chain KYC verification + on-chain attestation
+   - [ ] Oracle pattern for KYC status updates
+   - [ ] Revocation mechanism for expired KYC
+
+3. **Enhanced Governance**
+   - [ ] Timelock controller for parameter changes
+   - [ ] Snapshot integration for gasless voting
+   - [ ] Delegation mechanism for voting power
+   - [ ] Emergency pause functionality
+
+4. **Security Audit**
+   - [ ] External audit by reputable firm
+   - [ ] Bug bounty program
+   - [ ] Formal verification of critical functions
+   - [ ] Penetration testing
+
+### Phase 2: Scalability (Q2 2026)
+
+5. **Gas Optimization**
+   - [ ] Batch operations for multiple votes
+   - [ ] Merkle tree for large member sets
+   - [ ] Storage slot packing optimization
+   - [ ] Use of `immutable` for constants
+
+6. **Layer 2 Deployment**
+   - [ ] Deploy on Base Mainnet (L2)
+   - [ ] Cross-chain bridge for multi-chain donations
+   - [ ] Optimistic rollup integration
+
+7. **Advanced Bundling**
+   - [ ] ML-based bundle optimization
+   - [ ] Priority queue for urgent proposals
+   - [ ] Dynamic threshold adjustment
+
+### Phase 3: Feature Expansion (Q3 2026)
+
+8. **Multi-Token Support**
+   - [ ] Accept USDC, DAI, ETH donations
+   - [ ] Automated conversion to IDRX
+   - [ ] Price oracle integration
+
+9. **Milestone-Based Fundraising**
+   - [ ] Release funds in stages
+   - [ ] Community approval for each milestone
+   - [ ] Refund mechanism if milestones not met
+
+10. **Reputation System**
+    - [ ] Organizer reputation scores
+    - [ ] Donor contribution history
+    - [ ] Sharia council voting accuracy
+
+11. **Advanced SBTs**
+    - [ ] Dynamic NFT metadata (updates on-chain)
+    - [ ] Gamification (levels, badges)
+    - [ ] Composability with other protocols
+
+### Phase 4: Ecosystem Growth (Q4 2026)
+
+12. **Frontend Integration**
+    - [ ] Web3 dApp with React + wagmi
+    - [ ] Mobile app (React Native)
+    - [ ] Admin dashboard for analytics
+
+13. **Analytics & Reporting**
+    - [ ] On-chain event indexing (The Graph)
+    - [ ] Real-time dashboard (Dune Analytics)
+    - [ ] Transparent fund tracking
+
+14. **Compliance & Legal**
+    - [ ] Regulatory compliance for Zakat (Fatwa approval)
+    - [ ] AML/KYC compliance
+    - [ ] Tax reporting integration
+
+---
+
+## Contract Addresses
+
+### Base Sepolia Testnet
+
+**Deployment Date:** TBD  
+**Deployer:** TBD
+
+| Contract | Address | Etherscan |
+|----------|---------|-----------|
+| MockIDRX | `TBD` | [View](https://sepolia.basescan.org/address/TBD) |
+| SBTToken | `TBD` | [View](https://sepolia.basescan.org/address/TBD) |
+| CommunityDAO | `TBD` | [View](https://sepolia.basescan.org/address/TBD) |
+
+**Update after deployment:**
+```bash
+# After running deployment script, update this section with actual addresses
+```
+
+---
+
+## Useful Commands
+
+### Contract Interactions
+
+```bash
+# Read functions
+cast call $DAO_ADDRESS "proposalCount()" --rpc-url base_sepolia
+cast call $DAO_ADDRESS "getProposal(uint256)" 1 --rpc-url base_sepolia
+cast call $IDRX_ADDRESS "balanceOf(address)" $YOUR_ADDRESS --rpc-url base_sepolia
+
+# Write functions
+cast send $DAO_ADDRESS "function_name(args)" --rpc-url base_sepolia --private-key $PRIVATE_KEY
+
+# Decode events
+cast logs --rpc-url base_sepolia --address $DAO_ADDRESS --from-block 0
+
+# Check role
+cast call $DAO_ADDRESS "hasRole(bytes32,address)" $(cast keccak "ORGANIZER_ROLE") $ADDRESS --rpc-url base_sepolia
+```
+
+### Foundry Utilities
+
+```bash
+# Format code
+forge fmt
+
+# Gas snapshot
+forge snapshot
+
+# Decode calldata
+cast 4byte-decode 0x...
+
+# Convert units
+cast to-wei 1000 ether
+cast from-wei 1000000000000000000000
+
+# Generate keypair
+cast wallet new
+```
+
+---
+
+## Support & Resources
+
+- **Documentation:** This file
+- **Repository:** https://github.com/tawf-labs/zkt-sc
+- **Base Sepolia Faucet:** https://www.coinbase.com/faucets/base-ethereum-goerli-faucet
+- **Foundry Book:** https://book.getfoundry.sh/
+- **OpenZeppelin Docs:** https://docs.openzeppelin.com/
+- **Base Docs:** https://docs.base.org/
+
+---
+
+## Changelog
+
+### v1.0.0 - November 24, 2025
+- ✅ Initial implementation complete
+- ✅ MockIDRX with faucet
+- ✅ SBTToken with non-transferable NFTs
+- ✅ CommunityDAO with full governance flow
+- ✅ Automated bundling
+- ✅ Mock ZK-SNARK placeholders
+- ✅ Comprehensive test suite
+- ✅ Deployment scripts
+- ✅ Base Sepolia configuration
+
+---
+
+**End of Documentation**
+
+*This document will be updated as the project evolves. Last updated: November 24, 2025*
