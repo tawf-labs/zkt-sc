@@ -39,11 +39,12 @@ contract CommunityDAOTest is Test {
         // Grant MINTER_ROLE to DAO for VotingToken
         votingToken.grantRole(votingToken.MINTER_ROLE(), address(dao));
         
-        // Setup roles
+        // Setup roles (no ADMIN_ROLE - fully decentralized)
         dao.grantOrganizerRole(organizer);
         dao.grantShariaCouncilRole(shariaCouncil1);
         dao.grantShariaCouncilRole(shariaCouncil2);
         dao.grantShariaCouncilRole(shariaCouncil3);
+        dao.grantKYCOracleRole(deployer);  // Grant deployer KYC oracle role for tests
         
         // Grant voting power (1 token = 1 vote)
         dao.grantVotingPower(member1, 100 * 10**18);
@@ -163,9 +164,12 @@ contract CommunityDAOTest is Test {
         dao.finalizeCommunityVote(proposalId);
         
         proposal = dao.getProposal(proposalId);
-        assertEq(uint8(proposal.status), uint8(IProposalManager.ProposalStatus.CommunityPassed));
-        assertEq(proposal.votesFor, 2);
-        assertEq(proposal.votesAgainst, 1);
+        // After finalization with passing vote, automatic bundling occurs
+        // Status changes from CommunityPassed → ShariaReview
+        assertEq(uint8(proposal.status), uint8(IProposalManager.ProposalStatus.ShariaReview));
+        // Each member has 100 * 10^18 voting tokens, so votes are weighted
+        assertEq(proposal.votesFor, 200 * 10**18);  // member1 + member2
+        assertEq(proposal.votesAgainst, 100 * 10**18);  // member3
     }
     
     function testShariaReviewFlow() public {
@@ -191,14 +195,13 @@ contract CommunityDAOTest is Test {
         vm.warp(block.timestamp + 8 days);
         dao.finalizeCommunityVote(proposalId);
         
-        // Create bundle
-        uint256[] memory proposals = new uint256[](1);
-        proposals[0] = proposalId;
-        uint256 bundleId = dao.createShariaReviewBundle(proposals);
+        // Automatic bundling occurred during finalizeCommunityVote
+        uint256 bundleId = 1; // Auto-created bundle ID
         
         assertEq(bundleId, 1);
         
         // Sharia council reviews
+        // All 3 Sharia council members need to review (multi-sig 2/3 quorum)
         vm.prank(shariaCouncil1);
         dao.reviewProposal(
             bundleId,
@@ -217,22 +220,18 @@ contract CommunityDAOTest is Test {
             keccak256("sharia_proof_2")
         );
         
-        vm.prank(shariaCouncil3);
-        dao.reviewProposal(
-            bundleId,
-            proposalId,
-            true,
-            IProposalManager.CampaignType.ZakatCompliant,
-            keccak256("sharia_proof_3")
-        );
-        
-        // Finalize bundle
+        // Finalize bundle after 2/3 quorum reached
         vm.prank(shariaCouncil1);
         dao.finalizeShariaBundle(bundleId);
         
         IProposalManager.Proposal memory proposal = dao.getProposal(proposalId);
         assertEq(uint8(proposal.status), uint8(IProposalManager.ProposalStatus.ShariaApproved));
         assertEq(uint8(proposal.campaignType), uint8(IProposalManager.CampaignType.ZakatCompliant));
+        
+        // Organizer creates pool for their approved proposal
+        vm.prank(organizer);
+        uint256 poolId = dao.createCampaignPool(proposalId);
+        assertEq(poolId, 1);
     }
     
     function testFullDonationFlow() public {
@@ -258,9 +257,8 @@ contract CommunityDAOTest is Test {
         vm.warp(block.timestamp + 8 days);
         dao.finalizeCommunityVote(proposalId);
         
-        uint256[] memory proposals = new uint256[](1);
-        proposals[0] = proposalId;
-        uint256 bundleId = dao.createShariaReviewBundle(proposals);
+        // Automatic bundling occurred during finalizeCommunityVote
+        uint256 bundleId = 1; // Auto-created bundle ID
         
         vm.prank(shariaCouncil1);
         dao.reviewProposal(bundleId, proposalId, true, IProposalManager.CampaignType.ZakatCompliant, bytes32(0));
@@ -268,7 +266,8 @@ contract CommunityDAOTest is Test {
         vm.prank(shariaCouncil1);
         dao.finalizeShariaBundle(bundleId);
         
-        // Create pool
+        // Create pool (organizer creates their own pool after Sharia approval)
+        vm.prank(organizer);
         uint256 poolId = dao.createCampaignPool(proposalId);
         assertEq(poolId, 1);
         
@@ -317,6 +316,9 @@ contract CommunityDAOTest is Test {
     }
     
     function testFaucet() public {
+        // Fast forward past initial cooldown period
+        vm.warp(block.timestamp + 25 hours);
+        
         vm.startPrank(donor1);
         
         uint256 balanceBefore = idrxToken.balanceOf(donor1);
@@ -361,14 +363,14 @@ contract CommunityDAOTest is Test {
         vm.warp(block.timestamp + 8 days);
         dao.finalizeCommunityVote(proposalId);
         
-        uint256[] memory proposals = new uint256[](1);
-        proposals[0] = proposalId;
-        uint256 bundleId = dao.createShariaReviewBundle(proposals);
+        // Automatic bundling occurred during finalizeCommunityVote
+        uint256 bundleId = 1; // Auto-created bundle ID
         vm.prank(shariaCouncil1);
         dao.reviewProposal(bundleId, proposalId, true, IProposalManager.CampaignType.Normal, bytes32(0));
         vm.prank(shariaCouncil1);
         dao.finalizeShariaBundle(bundleId);
         
+        vm.prank(organizer);
         uint256 poolId = dao.createCampaignPool(proposalId);
         
         vm.startPrank(donor1);

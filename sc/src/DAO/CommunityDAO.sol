@@ -17,7 +17,9 @@ import "../tokens/VotingToken.sol";
  * Uses VotingToken (non-transferable ERC20) for community voting power
  */
 contract CommunityDAO is AccessControl {
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant ORGANIZER_ROLE = keccak256("ORGANIZER_ROLE");
+    bytes32 public constant KYC_ORACLE_ROLE = keccak256("KYC_ORACLE_ROLE");
+    bytes32 public constant SHARIA_COUNCIL_ROLE = keccak256("SHARIA_COUNCIL_ROLE");
     
     ProposalManager public proposalManager;
     VotingManager public votingManager;
@@ -37,56 +39,48 @@ contract CommunityDAO is AccessControl {
         receiptNFT = DonationReceiptNFT(_receiptNFT);
         votingToken = VotingToken(_votingToken);
         
-        // Deploy core modules
+        // Deploy core modules (they will grant DEFAULT_ADMIN_ROLE to msg.sender, which is this contract)
         proposalManager = new ProposalManager();
         votingManager = new VotingManager(address(proposalManager), _votingToken);
         shariaReviewManager = new ShariaReviewManager(address(proposalManager));
         poolManager = new PoolManager(address(proposalManager), _idrxToken, _receiptNFT);
+        
+        // Grant CommunityDAO all functional roles so it can delegate calls
+        proposalManager.grantRole(proposalManager.ORGANIZER_ROLE(), address(this));
+        proposalManager.grantRole(proposalManager.KYC_ORACLE_ROLE(), address(this));
+        shariaReviewManager.grantRole(shariaReviewManager.SHARIA_COUNCIL_ROLE(), address(this));
+        poolManager.grantRole(poolManager.ADMIN_ROLE(), address(this));
         
         // Grant cross-module permissions
         proposalManager.grantRole(proposalManager.VOTING_MANAGER_ROLE(), address(votingManager));
         proposalManager.grantRole(proposalManager.VOTING_MANAGER_ROLE(), address(shariaReviewManager));
         proposalManager.grantRole(proposalManager.VOTING_MANAGER_ROLE(), address(poolManager));
         
-        // Setup admin
+        // Setup deployer as DEFAULT_ADMIN_ROLE to grant initial roles
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(ADMIN_ROLE, msg.sender);
     }
     
     // ============ Role Management Helpers ============
     
-    function grantOrganizerRole(address account) external onlyRole(ADMIN_ROLE) {
-        proposalManager.grantRole(proposalManager.ORGANIZER_ROLE(), account);
+    function grantOrganizerRole(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _grantRole(ORGANIZER_ROLE, account);
     }
     
-    function grantVotingPower(address account, uint256 amount) external onlyRole(ADMIN_ROLE) {
-        votingToken.mint(account, amount, "Admin granted voting power");
+    function grantVotingPower(address account, uint256 amount) external {
+        // Permissionless - anyone can request voting tokens (in production, add faucet-style rate limits)
+        votingToken.mint(account, amount, "Voting power granted");
     }
     
-    function revokeVotingPower(address account, uint256 amount) external onlyRole(ADMIN_ROLE) {
+    function revokeVotingPower(address account, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
         votingToken.burn(account, amount, "Admin revoked voting power");
     }
     
-    function grantShariaCouncilRole(address account) external onlyRole(ADMIN_ROLE) {
-        shariaReviewManager.grantRole(shariaReviewManager.SHARIA_COUNCIL_ROLE(), account);
+    function grantShariaCouncilRole(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _grantRole(SHARIA_COUNCIL_ROLE, account);
     }
     
-    function grantKYCOracleRole(address account) external onlyRole(ADMIN_ROLE) {
-        proposalManager.grantRole(proposalManager.KYC_ORACLE_ROLE(), account);
-    }
-    
-    // ============ Re-export Core Constants for Compatibility ============
-    
-    function ORGANIZER_ROLE() external view returns (bytes32) {
-        return proposalManager.ORGANIZER_ROLE();
-    }
-    
-    function SHARIA_COUNCIL_ROLE() external view returns (bytes32) {
-        return shariaReviewManager.SHARIA_COUNCIL_ROLE();
-    }
-    
-    function KYC_ORACLE_ROLE() external view returns (bytes32) {
-        return proposalManager.KYC_ORACLE_ROLE();
+    function grantKYCOracleRole(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _grantRole(KYC_ORACLE_ROLE, account);
     }
     
     // ============ Re-export Core Functions for Ease of Use ============
@@ -99,8 +93,9 @@ contract CommunityDAO is AccessControl {
         bool isEmergency,
         bytes32 mockZKKYCProof,
         string[] memory zakatChecklistItems
-    ) external returns (uint256) {
+    ) external onlyRole(ORGANIZER_ROLE) returns (uint256) {
         return proposalManager.createProposal(
+            msg.sender,  // Pass actual caller as organizer
             title,
             description,
             fundingGoal,
@@ -114,21 +109,21 @@ contract CommunityDAO is AccessControl {
         uint256 proposalId,
         IProposalManager.KYCStatus newStatus,
         string memory notes
-    ) external {
+    ) external onlyRole(KYC_ORACLE_ROLE) {
         proposalManager.updateKYCStatus(proposalId, newStatus, notes);
     }
     
-    function submitForCommunityVote(uint256 proposalId) external {
+    function submitForCommunityVote(uint256 proposalId) external onlyRole(ORGANIZER_ROLE) {
         proposalManager.submitForCommunityVote(proposalId);
     }
     
-    function cancelProposal(uint256 proposalId) external {
+    function cancelProposal(uint256 proposalId) external onlyRole(ORGANIZER_ROLE) {
         proposalManager.cancelProposal(proposalId);
     }
     
     // Voting functions
     function castVote(uint256 proposalId, uint8 support) external {
-        votingManager.castVote(proposalId, support);
+        votingManager.castVote(msg.sender, proposalId, support);  // Pass actual voter
     }
     
     function finalizeCommunityVote(uint256 proposalId) external {
@@ -143,7 +138,7 @@ contract CommunityDAO is AccessControl {
         shariaReviewManager.checkAndCreateBundle();
     }
     
-    function createShariaReviewBundle(uint256[] memory proposalIds) external returns (uint256) {
+    function createShariaReviewBundle(uint256[] memory proposalIds) external onlyRole(SHARIA_COUNCIL_ROLE) returns (uint256) {
         return shariaReviewManager.createShariaReviewBundle(proposalIds);
     }
     
@@ -153,25 +148,30 @@ contract CommunityDAO is AccessControl {
         bool approved,
         IProposalManager.CampaignType campaignType,
         bytes32 mockZKReviewProof
-    ) external {
-        shariaReviewManager.reviewProposal(bundleId, proposalId, approved, campaignType, mockZKReviewProof);
+    ) external onlyRole(SHARIA_COUNCIL_ROLE) {
+        shariaReviewManager.reviewProposal(msg.sender, bundleId, proposalId, approved, campaignType, mockZKReviewProof);
     }
     
-    function finalizeShariaBundle(uint256 bundleId) external {
+    function finalizeShariaBundle(uint256 bundleId) external onlyRole(SHARIA_COUNCIL_ROLE) {
         shariaReviewManager.finalizeShariaBundle(bundleId);
     }
     
     // Pool functions
     function createCampaignPool(uint256 proposalId) external returns (uint256) {
+        // Only the proposal organizer can create the pool for their approved proposal
+        IProposalManager.Proposal memory proposal = proposalManager.getProposal(proposalId);
+        require(msg.sender == proposal.organizer, "Only proposal organizer");
+        require(proposal.status == IProposalManager.ProposalStatus.ShariaApproved, "Not Sharia approved");
+        
         return poolManager.createCampaignPool(proposalId);
     }
     
     function donate(uint256 poolId, uint256 amount) external {
-        poolManager.donate(poolId, amount);
+        poolManager.donate(msg.sender, poolId, amount);
     }
     
     function withdrawFunds(uint256 poolId) external {
-        poolManager.withdrawFunds(poolId);
+        poolManager.withdrawFunds(msg.sender, poolId);
     }
     
     // ============ View Functions ============
@@ -204,21 +204,21 @@ contract CommunityDAO is AccessControl {
         return poolManager.getDonorContribution(poolId, donor);
     }
     
-    // ============ Admin Functions ============
+    // ============ Configuration Functions (DEFAULT_ADMIN_ROLE for initial setup) ============
     
-    function setVotingPeriod(uint256 _votingPeriod) external onlyRole(ADMIN_ROLE) {
+    function setVotingPeriod(uint256 _votingPeriod) external onlyRole(DEFAULT_ADMIN_ROLE) {
         proposalManager.setVotingPeriod(_votingPeriod);
     }
     
-    function setQuorumPercentage(uint256 _quorumPercentage) external onlyRole(ADMIN_ROLE) {
+    function setQuorumPercentage(uint256 _quorumPercentage) external onlyRole(DEFAULT_ADMIN_ROLE) {
         votingManager.setQuorumPercentage(_quorumPercentage);
     }
     
-    function setPassThreshold(uint256 _passThreshold) external onlyRole(ADMIN_ROLE) {
+    function setPassThreshold(uint256 _passThreshold) external onlyRole(DEFAULT_ADMIN_ROLE) {
         votingManager.setPassThreshold(_passThreshold);
     }
     
-    function setShariaQuorum(uint256 _quorum) external onlyRole(ADMIN_ROLE) {
+    function setShariaQuorum(uint256 _quorum) external onlyRole(DEFAULT_ADMIN_ROLE) {
         shariaReviewManager.setShariaQuorum(_quorum);
     }
     

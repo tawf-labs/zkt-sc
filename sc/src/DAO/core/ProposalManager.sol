@@ -25,6 +25,7 @@ contract ProposalManager is AccessControl, IProposalManager {
     }
     
     function createProposal(
+        address organizer,
         string memory title,
         string memory description,
         uint256 fundingGoal,
@@ -32,6 +33,7 @@ contract ProposalManager is AccessControl, IProposalManager {
         bytes32 mockZKKYCProof,
         string[] memory zakatChecklistItems
     ) external onlyRole(ORGANIZER_ROLE) returns (uint256) {
+        require(organizer != address(0), "Invalid organizer address");
         require(fundingGoal > 0, "Funding goal must be > 0");
         require(bytes(title).length > 0, "Title cannot be empty");
         
@@ -40,7 +42,7 @@ contract ProposalManager is AccessControl, IProposalManager {
         
         Proposal storage proposal = proposals[proposalId];
         proposal.proposalId = proposalId;
-        proposal.organizer = msg.sender;
+        proposal.organizer = organizer;
         proposal.title = title;
         proposal.description = description;
         proposal.fundingGoal = fundingGoal;

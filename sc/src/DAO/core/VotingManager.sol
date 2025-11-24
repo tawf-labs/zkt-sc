@@ -38,7 +38,8 @@ contract VotingManager is AccessControl {
         _grantRole(ADMIN_ROLE, msg.sender);
     }
     
-    function castVote(uint256 proposalId, uint8 support) external {
+    function castVote(address voter, uint256 proposalId, uint8 support) external {
+        require(voter != address(0), "Invalid voter address");
         IProposalManager.Proposal memory proposal = proposalManager.getProposal(proposalId);
         
         require(proposal.status == IProposalManager.ProposalStatus.CommunityVote, "Voting not active");
@@ -47,13 +48,13 @@ contract VotingManager is AccessControl {
             block.timestamp <= proposal.communityVoteEnd,
             "Voting period ended"
         );
-        require(!hasVoted[proposalId][msg.sender], "Already voted");
+        require(!hasVoted[proposalId][voter], "Already voted");
         require(support <= 2, "Invalid vote option");
         
-        uint256 votingPower = votingToken.balanceOf(msg.sender);
+        uint256 votingPower = votingToken.balanceOf(voter);
         require(votingPower > 0, "No voting power (need vZKT tokens)");
         
-        hasVoted[proposalId][msg.sender] = true;
+        hasVoted[proposalId][voter] = true;
         
         if (support == 0) {
             votesAgainst[proposalId] += votingPower;
@@ -63,7 +64,7 @@ contract VotingManager is AccessControl {
             votesAbstain[proposalId] += votingPower;
         }
         
-        emit VoteCast(proposalId, msg.sender, support, votingPower);
+        emit VoteCast(proposalId, voter, support, votingPower);
     }
     
     function finalizeCommunityVote(uint256 proposalId) external returns (bool) {

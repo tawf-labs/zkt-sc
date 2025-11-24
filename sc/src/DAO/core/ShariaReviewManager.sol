@@ -107,10 +107,13 @@ contract ShariaReviewManager is AccessControl {
         bundle.finalized = false;
         
         for (uint256 i = 0; i < proposalIds.length; i++) {
+            IProposalManager.Proposal memory prop = proposalManager.getProposal(proposalIds[i]);
             proposalManager.updateProposalStatus(
                 proposalIds[i], 
                 IProposalManager.ProposalStatus.ShariaReview,
-                0, 0, 0
+                prop.votesFor,
+                prop.votesAgainst,
+                prop.votesAbstain
             );
         }
         
@@ -122,6 +125,7 @@ contract ShariaReviewManager is AccessControl {
     }
     
     function reviewProposal(
+        address reviewer,
         uint256 bundleId,
         uint256 proposalId,
         bool approved,
@@ -133,11 +137,11 @@ contract ShariaReviewManager is AccessControl {
         require(!bundle.finalized, "Bundle already finalized");
         require(_isProposalInBundle(bundleId, proposalId), "Proposal not in bundle");
         require(
-            !shariaVotes[bundleId][msg.sender][proposalId],
+            !shariaVotes[bundleId][reviewer][proposalId],
             "Already voted on this proposal"
         );
         
-        shariaVotes[bundleId][msg.sender][proposalId] = true;
+        shariaVotes[bundleId][reviewer][proposalId] = true;
         shariaReviewProofs[bundleId][proposalId] = mockZKReviewProof;
         
         if (approved) {

@@ -64,11 +64,13 @@ contract DeployDAO is Script {
         console.log("MINTER_ROLE granted to DAO");
         
         // 7. Setup initial roles for deployer (for testing)
+        // Note: Deployer has DEFAULT_ADMIN_ROLE for initial setup only
+        // After configuration, consider renouncing DEFAULT_ADMIN_ROLE for full decentralization
         console.log("\n7. Setting up initial roles...");
         dao.grantOrganizerRole(deployer);
         dao.grantShariaCouncilRole(deployer);
         dao.grantKYCOracleRole(deployer);
-        console.log("Initial admin roles granted to deployer");
+        console.log("Initial roles granted to deployer (ORGANIZER, SHARIA_COUNCIL, KYC_ORACLE)");
         
         // 8. Grant initial voting power to deployer (for testing)
         console.log("\n8. Granting initial voting power...");
@@ -94,13 +96,17 @@ contract DeployDAO is Script {
         console.log("\nConfiguration:");
         console.log("Deployer has ORGANIZER, SHARIA_COUNCIL, and KYC_ORACLE roles");
         console.log("Deployer has 1000 voting tokens");
+        console.log("Deployer has DEFAULT_ADMIN_ROLE for initial setup");
         console.log("\nNext Steps:");
         console.log("1. Verify contracts on Basescan");
         console.log("2. Grant organizer roles: dao.grantOrganizerRole(address)");
         console.log("3. Grant voting power: dao.grantVotingPower(address, amount)");
         console.log("4. Grant Sharia council roles: dao.grantShariaCouncilRole(address)");
         console.log("5. Test the IDRX faucet: cast send", address(idrxToken), "\"faucet()\" --rpc-url base_sepolia --private-key $PRIVATE_KEY");
+        console.log("6. [OPTIONAL] Renounce DEFAULT_ADMIN_ROLE for full decentralization");
         console.log("\nArchitecture Notes:");
+        console.log("- Fully decentralized: No ADMIN_ROLE, only DEFAULT_ADMIN_ROLE for initial setup");
+        console.log("- Pool creation: Organizer-only (no admin needed after Sharia approval)");
         console.log("- One non-transferable receipt NFT minted per donation (not per pool)");
         console.log("- VotingToken (non-transferable ERC20) used for community voting");
         console.log("- Modular design: ProposalManager, VotingManager, ShariaReviewManager, PoolManager");

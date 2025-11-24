@@ -65,6 +65,7 @@ interface IProposalManager {
     event ProposalCanceled(uint256 indexed proposalId);
     
     function createProposal(
+        address organizer,
         string memory title,
         string memory description,
         uint256 fundingGoal,

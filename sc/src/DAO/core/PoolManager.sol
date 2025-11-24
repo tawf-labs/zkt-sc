@@ -103,43 +103,43 @@ contract PoolManager is AccessControl, ReentrancyGuard {
         return poolId;
     }
     
-    function donate(uint256 poolId, uint256 amount) external nonReentrant {
+    function donate(address donor, uint256 poolId, uint256 amount) external nonReentrant {
         CampaignPool storage pool = campaignPools[poolId];
         
         require(pool.isActive, "Pool not active");
         require(amount > 0, "Amount must be > 0");
         
         require(
-            idrxToken.transferFrom(msg.sender, address(this), amount),
+            idrxToken.transferFrom(donor, address(this), amount),
             "IDRX transfer failed"
         );
         
-        bool isFirstDonation = poolDonations[poolId][msg.sender] == 0;
+        bool isFirstDonation = poolDonations[poolId][donor] == 0;
         
         if (isFirstDonation) {
-            pool.donors.push(msg.sender);
+            pool.donors.push(donor);
         }
         
-        poolDonations[poolId][msg.sender] += amount;
+        poolDonations[poolId][donor] += amount;
         pool.raisedAmount += amount;
         
         // Mint new NFT receipt for EVERY donation (one receipt per donation)
         string memory campaignTypeStr = pool.campaignType == IProposalManager.CampaignType.ZakatCompliant 
             ? "Zakat" 
             : "Normal";
-        uint256 receiptTokenId = receiptNFT.mint(msg.sender, poolId, amount, pool.campaignTitle, campaignTypeStr);
+        uint256 receiptTokenId = receiptNFT.mint(donor, poolId, amount, pool.campaignTitle, campaignTypeStr);
         
-        emit DonationReceived(poolId, msg.sender, amount, receiptTokenId);
+        emit DonationReceived(poolId, donor, amount, receiptTokenId);
         
         if (pool.raisedAmount >= pool.fundingGoal) {
             emit FundingGoalReached(poolId, pool.raisedAmount);
         }
     }
     
-    function withdrawFunds(uint256 poolId) external nonReentrant {
+    function withdrawFunds(address organizer, uint256 poolId) external nonReentrant {
         CampaignPool storage pool = campaignPools[poolId];
         
-        require(pool.organizer == msg.sender, "Not organizer");
+        require(pool.organizer == organizer, "Not organizer");
         require(!pool.fundsWithdrawn, "Funds already withdrawn");
         require(pool.raisedAmount > 0, "No funds to withdraw");
         
@@ -149,9 +149,9 @@ contract PoolManager is AccessControl, ReentrancyGuard {
         uint256 amount = pool.raisedAmount;
         proposalManager.updateProposalStatus(pool.proposalId, IProposalManager.ProposalStatus.Completed, 0, 0, 0);
         
-        require(idrxToken.transfer(msg.sender, amount), "Transfer failed");
+        require(idrxToken.transfer(organizer, amount), "Transfer failed");
         
-        emit FundsWithdrawn(poolId, msg.sender, amount);
+        emit FundsWithdrawn(poolId, organizer, amount);
     }
     
     function getPool(uint256 poolId) external view returns (CampaignPool memory) {
