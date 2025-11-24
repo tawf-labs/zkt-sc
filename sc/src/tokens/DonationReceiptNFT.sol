@@ -7,12 +7,12 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/Base64.sol";
 
 /**
- * @title SBTToken
- * @notice Soulbound Token (non-transferable NFT) for ZKT donation proof
- * @dev ERC721 with transfers blocked except minting/burning
- * Each SBT represents a donor's contribution to a specific campaign pool
+ * @title DonationReceiptNFT
+ * @notice Non-transferable NFT for ZKT donation receipts
+ * @dev Each donation mints a new NFT as an immutable receipt
+ * One NFT = One donation transaction proof (soulbound to donor)
  */
-contract SBTToken is ERC721URIStorage, AccessControl {
+contract DonationReceiptNFT is ERC721URIStorage, AccessControl {
     using Strings for uint256;
     
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
@@ -20,19 +20,20 @@ contract SBTToken is ERC721URIStorage, AccessControl {
     
     uint256 private _tokenIdCounter;
     
-    // Token metadata
+    // Token metadata (immutable after minting)
     struct SBTMetadata {
         uint256 poolId;
         address donor;
-        uint256 totalDonated;
-        uint256 mintedAt;
+        uint256 donationAmount;
+        uint256 donatedAt;
+        string campaignTitle;
         string campaignType; // "Zakat" or "Normal"
         bool isActive;
     }
     
     // Mappings
     mapping(uint256 => SBTMetadata) public tokenMetadata;
-    mapping(address => mapping(uint256 => uint256)) public donorPoolToToken; // donor => poolId => tokenId
+    mapping(address => uint256[]) public donorTokens; // donor => array of tokenIds
     
     // Events
     event SBTMinted(
@@ -42,20 +43,20 @@ contract SBTToken is ERC721URIStorage, AccessControl {
         uint256 amount,
         string campaignType
     );
-    event SBTUpdated(uint256 indexed tokenId, uint256 newTotalDonated);
     event SBTBurned(uint256 indexed tokenId, address indexed donor, string reason);
     
-    constructor() ERC721("ZKT Donation SBT", "ZKT-SBT") {
+    constructor() ERC721("ZKT Donation Receipt", "ZKT-RECEIPT") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
         _grantRole(MINTER_ROLE, msg.sender);
     }
     
     /**
-     * @notice Mint a new SBT to a donor for their first donation to a pool
+     * @notice Mint a new SBT receipt for each donation
      * @param to Donor address
      * @param poolId Campaign pool ID
-     * @param amount Initial donation amount
+     * @param amount Donation amount
+     * @param campaignTitle Campaign name
      * @param campaignType "Zakat" or "Normal"
      * @return tokenId The minted token ID
      */
@@ -63,30 +64,30 @@ contract SBTToken is ERC721URIStorage, AccessControl {
         address to,
         uint256 poolId,
         uint256 amount,
+        string memory campaignTitle,
         string memory campaignType
     ) external onlyRole(MINTER_ROLE) returns (uint256) {
-        require(to != address(0), "SBT: Cannot mint to zero address");
-        require(amount > 0, "SBT: Amount must be greater than 0");
-        require(
-            donorPoolToToken[to][poolId] == 0,
-            "SBT: Donor already has SBT for this pool"
-        );
+        require(to != address(0), "DonationReceiptNFT: Cannot mint to zero address");
+        require(amount > 0, "DonationReceiptNFT: Amount must be greater than 0");
         
         _tokenIdCounter++;
         uint256 tokenId = _tokenIdCounter;
         
         _safeMint(to, tokenId);
         
+        // Store immutable metadata
         tokenMetadata[tokenId] = SBTMetadata({
             poolId: poolId,
             donor: to,
-            totalDonated: amount,
-            mintedAt: block.timestamp,
+            donationAmount: amount,
+            donatedAt: block.timestamp,
+            campaignTitle: campaignTitle,
             campaignType: campaignType,
             isActive: true
         });
         
-        donorPoolToToken[to][poolId] = tokenId;
+        // Track donor's receipts
+        donorTokens[to].push(tokenId);
         
         // Generate and set token URI
         string memory uri = _generateTokenURI(tokenId);
@@ -98,42 +99,15 @@ contract SBTToken is ERC721URIStorage, AccessControl {
     }
     
     /**
-     * @notice Update SBT metadata when donor makes additional donations
-     * @param donor Donor address
-     * @param poolId Campaign pool ID
-     * @param additionalAmount Amount to add to total donated
-     */
-    function updateDonation(
-        address donor,
-        uint256 poolId,
-        uint256 additionalAmount
-    ) external onlyRole(MINTER_ROLE) {
-        uint256 tokenId = donorPoolToToken[donor][poolId];
-        require(tokenId != 0, "SBT: No SBT found for this donor and pool");
-        require(tokenMetadata[tokenId].isActive, "SBT: Token is not active");
-        
-        tokenMetadata[tokenId].totalDonated += additionalAmount;
-        
-        // Update token URI with new amount
-        string memory uri = _generateTokenURI(tokenId);
-        _setTokenURI(tokenId, uri);
-        
-        emit SBTUpdated(tokenId, tokenMetadata[tokenId].totalDonated);
-    }
-    
-    /**
-     * @notice Burn SBT (admin only, e.g., if donation refunded due to fraud)
+     * @notice Burn SBT (admin only, e.g., fraudulent donation refunded)
      * @param tokenId Token ID to burn
      * @param reason Reason for burning
      */
     function burn(uint256 tokenId, string memory reason) external onlyRole(ADMIN_ROLE) {
-        require(_ownerOf(tokenId) != address(0), "SBT: Token does not exist");
+        require(_ownerOf(tokenId) != address(0), "DonationReceiptNFT: Token does not exist");
         
         address donor = tokenMetadata[tokenId].donor;
-        uint256 poolId = tokenMetadata[tokenId].poolId;
-        
         tokenMetadata[tokenId].isActive = false;
-        donorPoolToToken[donor][poolId] = 0;
         
         _burn(tokenId);
         
@@ -141,7 +115,7 @@ contract SBTToken is ERC721URIStorage, AccessControl {
     }
     
     /**
-     * @notice Generate on-chain JSON metadata for token
+     * @notice Generate on-chain JSON metadata for donation receipt
      * @param tokenId Token ID
      * @return Base64-encoded JSON metadata URI
      */
@@ -149,22 +123,26 @@ contract SBTToken is ERC721URIStorage, AccessControl {
         SBTMetadata memory meta = tokenMetadata[tokenId];
         
         bytes memory json = abi.encodePacked(
-            '{"name": "ZKT Donation SBT #',
+            '{"name": "ZKT Donation Receipt #',
             tokenId.toString(),
-            '", "description": "Soulbound token proving contribution to ZKT campaign pool #',
-            meta.poolId.toString(),
-            '", "image": "ipfs://QmZKTDonationBadge", "attributes": [',
-            '{"trait_type": "Pool ID", "value": "',
+            '", "description": "Immutable proof of donation to campaign: ',
+            meta.campaignTitle,
+            '", "image": "ipfs://QmZKTReceiptBadge", "attributes": [',
+            '{"trait_type": "Campaign Title", "value": "',
+            meta.campaignTitle,
+            '"}, {"trait_type": "Pool ID", "value": "',
             meta.poolId.toString(),
             '"}, {"trait_type": "Campaign Type", "value": "',
             meta.campaignType,
-            '"}, {"trait_type": "Total Donated", "value": "',
-            meta.totalDonated.toString(),
-            ' IDRX"}, {"trait_type": "Minted At", "value": "',
-            meta.mintedAt.toString(),
+            '"}, {"trait_type": "Donation Amount", "value": "',
+            meta.donationAmount.toString(),
+            ' IDRX"}, {"trait_type": "Donated At", "value": "',
+            meta.donatedAt.toString(),
             '"}, {"trait_type": "Status", "value": "',
             meta.isActive ? "Active" : "Burned",
-            '"}]}'
+            '"}], "external_url": "https://zkt.app/receipts/',
+            tokenId.toString(),
+            '"}'
         );
         
         return string(
@@ -176,17 +154,19 @@ contract SBTToken is ERC721URIStorage, AccessControl {
     }
     
     /**
-     * @notice Get SBT token ID for a donor and pool
+     * @notice Get all donation receipts for a donor
      * @param donor Donor address
-     * @param poolId Pool ID
-     * @return tokenId (0 if no SBT exists)
+     * @return Array of token IDs
      */
-    function getTokenIdForDonorAndPool(address donor, uint256 poolId) 
-        external 
-        view 
-        returns (uint256) 
-    {
-        return donorPoolToToken[donor][poolId];
+    function getDonorReceipts(address donor) external view returns (uint256[] memory) {
+        return donorTokens[donor];
+    }
+    
+    /**
+     * @notice Get total donations count for a donor
+     */
+    function getDonorReceiptCount(address donor) external view returns (uint256) {
+        return donorTokens[donor].length;
     }
     
     /**
@@ -203,7 +183,7 @@ contract SBTToken is ERC721URIStorage, AccessControl {
         // Allow minting (from == address(0)) and burning (to == address(0))
         require(
             from == address(0) || to == address(0),
-            "SBT: Token is non-transferable (soulbound)"
+            "DonationReceiptNFT: Non-transferable receipt"
         );
         
         return super._update(to, tokenId, auth);

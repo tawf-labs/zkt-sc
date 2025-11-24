@@ -3,12 +3,16 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import "../src/tokens/MockIDRX.sol";
-import "../src/tokens/SBTToken.sol";
+import "../src/tokens/DonationReceiptNFT.sol";
+import "../src/tokens/VotingToken.sol";
 import "../src/DAO/CommunityDAO.sol";
+import "../src/DAO/interfaces/IProposalManager.sol";
+import "../src/DAO/core/PoolManager.sol";
 
 contract CommunityDAOTest is Test {
     MockIDRX public idrxToken;
-    SBTToken public sbtToken;
+    DonationReceiptNFT public receiptNFT;
+    VotingToken public votingToken;
     CommunityDAO public dao;
     
     address public deployer = address(this);
@@ -25,23 +29,26 @@ contract CommunityDAOTest is Test {
     function setUp() public {
         // Deploy contracts
         idrxToken = new MockIDRX();
-        sbtToken = new SBTToken();
-        dao = new CommunityDAO(address(idrxToken), address(sbtToken));
+        receiptNFT = new DonationReceiptNFT();
+        votingToken = new VotingToken();
+        dao = new CommunityDAO(address(idrxToken), address(receiptNFT), address(votingToken));
         
-        // Grant MINTER_ROLE to DAO
-        sbtToken.grantRole(sbtToken.MINTER_ROLE(), address(dao));
+        // Grant MINTER_ROLE to PoolManager
+        receiptNFT.grantRole(receiptNFT.MINTER_ROLE(), dao.getPoolManagerAddress());
+        
+        // Grant MINTER_ROLE to DAO for VotingToken
+        votingToken.grantRole(votingToken.MINTER_ROLE(), address(dao));
         
         // Setup roles
-        dao.grantRole(dao.ORGANIZER_ROLE(), organizer);
-        dao.grantRole(dao.COMMUNITY_MEMBER_ROLE(), member1);
-        dao.grantRole(dao.COMMUNITY_MEMBER_ROLE(), member2);
-        dao.grantRole(dao.COMMUNITY_MEMBER_ROLE(), member3);
-        dao.grantRole(dao.SHARIA_COUNCIL_ROLE(), shariaCouncil1);
-        dao.grantRole(dao.SHARIA_COUNCIL_ROLE(), shariaCouncil2);
-        dao.grantRole(dao.SHARIA_COUNCIL_ROLE(), shariaCouncil3);
+        dao.grantOrganizerRole(organizer);
+        dao.grantShariaCouncilRole(shariaCouncil1);
+        dao.grantShariaCouncilRole(shariaCouncil2);
+        dao.grantShariaCouncilRole(shariaCouncil3);
         
-        // Set total community members
-        dao.setTotalCommunityMembers(3);
+        // Grant voting power (1 token = 1 vote)
+        dao.grantVotingPower(member1, 100 * 10**18);
+        dao.grantVotingPower(member2, 100 * 10**18);
+        dao.grantVotingPower(member3, 100 * 10**18);
         
         // Give IDRX to donors
         idrxToken.adminMint(donor1, 10000 * 10**18);
@@ -69,12 +76,12 @@ contract CommunityDAOTest is Test {
         assertEq(proposalId, 1);
         assertEq(dao.proposalCount(), 1);
         
-        CommunityDAO.Proposal memory proposal = dao.getProposal(1);
+        IProposalManager.Proposal memory proposal = dao.getProposal(1);
         assertEq(proposal.organizer, organizer);
         assertEq(proposal.title, "Build School in Village");
         assertEq(proposal.fundingGoal, 1000 * 10**18);
-        assertEq(uint8(proposal.status), uint8(CommunityDAO.ProposalStatus.Draft));
-        assertEq(uint8(proposal.kycStatus), uint8(CommunityDAO.KYCStatus.Pending));
+        assertEq(uint8(proposal.status), uint8(IProposalManager.ProposalStatus.Draft));
+        assertEq(uint8(proposal.kycStatus), uint8(IProposalManager.KYCStatus.Pending));
     }
     
     function testEmergencyProposal() public {
@@ -91,9 +98,9 @@ contract CommunityDAOTest is Test {
         
         vm.stopPrank();
         
-        CommunityDAO.Proposal memory proposal = dao.getProposal(proposalId);
+        IProposalManager.Proposal memory proposal = dao.getProposal(proposalId);
         assertTrue(proposal.isEmergency);
-        assertEq(uint8(proposal.kycStatus), uint8(CommunityDAO.KYCStatus.NotRequired));
+        assertEq(uint8(proposal.kycStatus), uint8(IProposalManager.KYCStatus.NotRequired));
     }
     
     function testKYCUpdate() public {
@@ -110,12 +117,12 @@ contract CommunityDAOTest is Test {
         // Update KYC status
         dao.updateKYCStatus(
             proposalId,
-            CommunityDAO.KYCStatus.Verified,
+            IProposalManager.KYCStatus.Verified,
             "KYC verified via mock ZK proof"
         );
         
-        CommunityDAO.Proposal memory proposal = dao.getProposal(proposalId);
-        assertEq(uint8(proposal.kycStatus), uint8(CommunityDAO.KYCStatus.Verified));
+        IProposalManager.Proposal memory proposal = dao.getProposal(proposalId);
+        assertEq(uint8(proposal.kycStatus), uint8(IProposalManager.KYCStatus.Verified));
     }
     
     function testCommunityVoteFlow() public {
@@ -130,14 +137,14 @@ contract CommunityDAOTest is Test {
             new string[](0)
         );
         
-        dao.updateKYCStatus(proposalId, CommunityDAO.KYCStatus.Verified, "Verified");
+        dao.updateKYCStatus(proposalId, IProposalManager.KYCStatus.Verified, "Verified");
         
         // Submit for vote
         vm.prank(organizer);
         dao.submitForCommunityVote(proposalId);
         
-        CommunityDAO.Proposal memory proposal = dao.getProposal(proposalId);
-        assertEq(uint8(proposal.status), uint8(CommunityDAO.ProposalStatus.CommunityVote));
+        IProposalManager.Proposal memory proposal = dao.getProposal(proposalId);
+        assertEq(uint8(proposal.status), uint8(IProposalManager.ProposalStatus.CommunityVote));
         
         // Cast votes
         vm.prank(member1);
@@ -156,7 +163,7 @@ contract CommunityDAOTest is Test {
         dao.finalizeCommunityVote(proposalId);
         
         proposal = dao.getProposal(proposalId);
-        assertEq(uint8(proposal.status), uint8(CommunityDAO.ProposalStatus.CommunityPassed));
+        assertEq(uint8(proposal.status), uint8(IProposalManager.ProposalStatus.CommunityPassed));
         assertEq(proposal.votesFor, 2);
         assertEq(proposal.votesAgainst, 1);
     }
@@ -197,7 +204,7 @@ contract CommunityDAOTest is Test {
             bundleId,
             proposalId,
             true,
-            CommunityDAO.CampaignType.ZakatCompliant,
+            IProposalManager.CampaignType.ZakatCompliant,
             keccak256("sharia_proof_1")
         );
         
@@ -206,7 +213,7 @@ contract CommunityDAOTest is Test {
             bundleId,
             proposalId,
             true,
-            CommunityDAO.CampaignType.ZakatCompliant,
+            IProposalManager.CampaignType.ZakatCompliant,
             keccak256("sharia_proof_2")
         );
         
@@ -215,7 +222,7 @@ contract CommunityDAOTest is Test {
             bundleId,
             proposalId,
             true,
-            CommunityDAO.CampaignType.ZakatCompliant,
+            IProposalManager.CampaignType.ZakatCompliant,
             keccak256("sharia_proof_3")
         );
         
@@ -223,9 +230,9 @@ contract CommunityDAOTest is Test {
         vm.prank(shariaCouncil1);
         dao.finalizeShariaBundle(bundleId);
         
-        CommunityDAO.Proposal memory proposal = dao.getProposal(proposalId);
-        assertEq(uint8(proposal.status), uint8(CommunityDAO.ProposalStatus.ShariaApproved));
-        assertEq(uint8(proposal.campaignType), uint8(CommunityDAO.CampaignType.ZakatCompliant));
+        IProposalManager.Proposal memory proposal = dao.getProposal(proposalId);
+        assertEq(uint8(proposal.status), uint8(IProposalManager.ProposalStatus.ShariaApproved));
+        assertEq(uint8(proposal.campaignType), uint8(IProposalManager.CampaignType.ZakatCompliant));
     }
     
     function testFullDonationFlow() public {
@@ -256,7 +263,7 @@ contract CommunityDAOTest is Test {
         uint256 bundleId = dao.createShariaReviewBundle(proposals);
         
         vm.prank(shariaCouncil1);
-        dao.reviewProposal(bundleId, proposalId, true, CommunityDAO.CampaignType.ZakatCompliant, bytes32(0));
+        dao.reviewProposal(bundleId, proposalId, true, IProposalManager.CampaignType.ZakatCompliant, bytes32(0));
         
         vm.prank(shariaCouncil1);
         dao.finalizeShariaBundle(bundleId);
@@ -265,26 +272,40 @@ contract CommunityDAOTest is Test {
         uint256 poolId = dao.createCampaignPool(proposalId);
         assertEq(poolId, 1);
         
-        // Donor1 donates
+        // Donor1 donates (first donation)
         vm.startPrank(donor1);
-        idrxToken.approve(address(dao), 500 * 10**18);
+        idrxToken.approve(address(dao.getPoolManagerAddress()), 500 * 10**18);
         dao.donate(poolId, 500 * 10**18);
         vm.stopPrank();
         
-        // Check SBT minted
-        uint256 tokenId = sbtToken.getTokenIdForDonorAndPool(donor1, poolId);
-        assertEq(tokenId, 1);
-        assertEq(sbtToken.ownerOf(tokenId), donor1);
+        // Check first receipt NFT minted
+        uint256[] memory donor1Receipts = receiptNFT.getDonorReceipts(donor1);
+        assertEq(donor1Receipts.length, 1);
+        assertEq(receiptNFT.ownerOf(donor1Receipts[0]), donor1);
+        
+        // Donor1 donates again (should mint ANOTHER receipt NFT)
+        vm.startPrank(donor1);
+        idrxToken.approve(address(dao.getPoolManagerAddress()), 300 * 10**18);
+        dao.donate(poolId, 300 * 10**18);
+        vm.stopPrank();
+        
+        // Check second receipt NFT minted for same donor
+        donor1Receipts = receiptNFT.getDonorReceipts(donor1);
+        assertEq(donor1Receipts.length, 2); // Now has 2 receipt NFTs
         
         // Donor2 donates
         vm.startPrank(donor2);
-        idrxToken.approve(address(dao), 600 * 10**18);
+        idrxToken.approve(address(dao.getPoolManagerAddress()), 600 * 10**18);
         dao.donate(poolId, 600 * 10**18);
         vm.stopPrank();
         
+        // Check donor2 has 1 receipt NFT
+        uint256[] memory donor2Receipts = receiptNFT.getDonorReceipts(donor2);
+        assertEq(donor2Receipts.length, 1);
+        
         // Check pool status
-        CommunityDAO.CampaignPool memory pool = dao.getPool(poolId);
-        assertEq(pool.raisedAmount, 1100 * 10**18);
+        PoolManager.CampaignPool memory pool = dao.getPool(poolId);
+        assertEq(pool.raisedAmount, 1400 * 10**18); // 500 + 300 + 600
         assertTrue(pool.raisedAmount >= pool.fundingGoal);
         
         // Organizer withdraws
@@ -292,7 +313,7 @@ contract CommunityDAOTest is Test {
         vm.prank(organizer);
         dao.withdrawFunds(poolId);
         
-        assertEq(idrxToken.balanceOf(organizer), organizerBalanceBefore + 1100 * 10**18);
+        assertEq(idrxToken.balanceOf(organizer), organizerBalanceBefore + 1400 * 10**18);
     }
     
     function testFaucet() public {
@@ -318,8 +339,8 @@ contract CommunityDAOTest is Test {
         vm.stopPrank();
     }
     
-    function testSBTNonTransferable() public {
-        // Setup and create donation to mint SBT
+    function testReceiptNFTNonTransferable() public {
+        // Setup and create donation to mint receipt NFT
         vm.prank(organizer);
         uint256 proposalId = dao.createProposal(
             "Test",
@@ -344,22 +365,23 @@ contract CommunityDAOTest is Test {
         proposals[0] = proposalId;
         uint256 bundleId = dao.createShariaReviewBundle(proposals);
         vm.prank(shariaCouncil1);
-        dao.reviewProposal(bundleId, proposalId, true, CommunityDAO.CampaignType.Normal, bytes32(0));
+        dao.reviewProposal(bundleId, proposalId, true, IProposalManager.CampaignType.Normal, bytes32(0));
         vm.prank(shariaCouncil1);
         dao.finalizeShariaBundle(bundleId);
         
         uint256 poolId = dao.createCampaignPool(proposalId);
         
         vm.startPrank(donor1);
-        idrxToken.approve(address(dao), 100 * 10**18);
+        idrxToken.approve(address(dao.getPoolManagerAddress()), 100 * 10**18);
         dao.donate(poolId, 100 * 10**18);
         vm.stopPrank();
         
-        uint256 tokenId = sbtToken.getTokenIdForDonorAndPool(donor1, poolId);
+        uint256[] memory receipts = receiptNFT.getDonorReceipts(donor1);
+        uint256 tokenId = receipts[0];
         
-        // Try to transfer SBT (should fail)
+        // Try to transfer receipt NFT (should fail)
         vm.prank(donor1);
-        vm.expectRevert("SBT: Token is non-transferable (soulbound)");
-        sbtToken.transferFrom(donor1, donor2, tokenId);
+        vm.expectRevert("DonationReceiptNFT: Non-transferable receipt");
+        receiptNFT.transferFrom(donor1, donor2, tokenId);
     }
 }
