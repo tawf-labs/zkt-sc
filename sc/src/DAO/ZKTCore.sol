@@ -16,7 +16,7 @@ import "../tokens/VotingToken.sol";
  * @dev Deploys and coordinates: ProposalManager, VotingManager, ShariaReviewManager, PoolManager
  * Uses VotingToken (non-transferable ERC20) for community voting power
  */
-contract CommunityDAO is AccessControl {
+contract ZKTCore is AccessControl {
     bytes32 public constant ORGANIZER_ROLE = keccak256("ORGANIZER_ROLE");
     bytes32 public constant KYC_ORACLE_ROLE = keccak256("KYC_ORACLE_ROLE");
     bytes32 public constant SHARIA_COUNCIL_ROLE = keccak256("SHARIA_COUNCIL_ROLE");

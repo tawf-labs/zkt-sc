@@ -12,12 +12,12 @@ import "../src/DAO/ZKTCore.sol";
  * @notice Deployment script for ZKT Community DAO system on Base Sepolia
  * @dev Run with: forge script script/DeployDAO.s.sol:DeployDAO --rpc-url base_sepolia --broadcast --verify
  */
-contract DeployDAO is Script {
+contract DeployZKT is Script {
     // Deployment addresses (will be set after deployment)
     MockIDRX public idrxToken;
     DonationReceiptNFT public receiptNFT;
     VotingToken public votingToken;
-    CommunityDAO public dao;
+    ZKTCore public dao;
     
     function run() external {
         // Get deployer private key from environment
@@ -44,10 +44,10 @@ contract DeployDAO is Script {
         votingToken = new VotingToken();
         console.log("VotingToken deployed at:", address(votingToken));
         
-        // 4. Deploy CommunityDAO
-        console.log("\n4. Deploying CommunityDAO (orchestrator + all managers)...");
-        dao = new CommunityDAO(address(idrxToken), address(receiptNFT), address(votingToken));
-        console.log("CommunityDAO deployed at:", address(dao));
+        // 4. Deploy ZKTCore
+        console.log("\n4. Deploying ZKTCore (orchestrator + all managers)...");
+        dao = new ZKTCore(address(idrxToken), address(receiptNFT), address(votingToken));
+        console.log("ZKTCore deployed at:", address(dao));
         console.log("ProposalManager deployed at:", dao.getProposalManagerAddress());
         console.log("VotingManager deployed at:", dao.getVotingManagerAddress());
         console.log("ShariaReviewManager deployed at:", dao.getShariaReviewManagerAddress());
@@ -88,7 +88,7 @@ contract DeployDAO is Script {
         console.log("DonationReceiptNFT:", address(receiptNFT));
         console.log("VotingToken:", address(votingToken));
         console.log("\nDAO Contract Addresses:");
-        console.log("CommunityDAO (Orchestrator):", address(dao));
+        console.log("ZKTCore (Orchestrator):", address(dao));
         console.log("ProposalManager:", dao.getProposalManagerAddress());
         console.log("VotingManager:", dao.getVotingManagerAddress());
         console.log("ShariaReviewManager:", dao.getShariaReviewManagerAddress());

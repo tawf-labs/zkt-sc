@@ -9,11 +9,11 @@ import "../src/DAO/ZKTCore.sol";
 import "../src/DAO/interfaces/IProposalManager.sol";
 import "../src/DAO/core/PoolManager.sol";
 
-contract CommunityDAOTest is Test {
+contract ZKTCoreTest is Test {
     MockIDRX public idrxToken;
     DonationReceiptNFT public receiptNFT;
     VotingToken public votingToken;
-    CommunityDAO public dao;
+    ZKTCore public dao;
     
     address public deployer = address(this);
     address public organizer = address(0x1);
@@ -31,7 +31,7 @@ contract CommunityDAOTest is Test {
         idrxToken = new MockIDRX();
         receiptNFT = new DonationReceiptNFT();
         votingToken = new VotingToken();
-        dao = new CommunityDAO(address(idrxToken), address(receiptNFT), address(votingToken));
+        dao = new ZKTCore(address(idrxToken), address(receiptNFT), address(votingToken));
         
         // Grant MINTER_ROLE to PoolManager
         receiptNFT.grantRole(receiptNFT.MINTER_ROLE(), dao.getPoolManagerAddress());
