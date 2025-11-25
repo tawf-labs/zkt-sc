@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "../src/tokens/MockIDRX.sol";
 import "../src/tokens/DonationReceiptNFT.sol";
 import "../src/tokens/VotingToken.sol";
-import "../src/DAO/CommunityDAO.sol";
+import "../src/DAO/ZKTCore.sol";
 import "../src/DAO/interfaces/IProposalManager.sol";
 import "../src/DAO/core/PoolManager.sol";
 

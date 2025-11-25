@@ -11,7 +11,7 @@ import "../tokens/DonationReceiptNFT.sol";
 import "../tokens/VotingToken.sol";
 
 /**
- * @title CommunityDAO
+ * @title ZKTCore
  * @notice Orchestrator contract for the modular ZKT DAO system
  * @dev Deploys and coordinates: ProposalManager, VotingManager, ShariaReviewManager, PoolManager
  * Uses VotingToken (non-transferable ERC20) for community voting power

@@ -5,10 +5,10 @@ import "forge-std/Script.sol";
 import "../src/tokens/MockIDRX.sol";
 import "../src/tokens/DonationReceiptNFT.sol";
 import "../src/tokens/VotingToken.sol";
-import "../src/DAO/CommunityDAO.sol";
+import "../src/DAO/ZKTCore.sol";
 
 /**
- * @title DeployDAO
+ * @title DeployZKTDAO
  * @notice Deployment script for ZKT Community DAO system on Base Sepolia
  * @dev Run with: forge script script/DeployDAO.s.sol:DeployDAO --rpc-url base_sepolia --broadcast --verify
  */
