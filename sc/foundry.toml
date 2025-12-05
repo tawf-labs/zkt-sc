@@ -10,8 +10,12 @@ via_ir = true
 # Base Sepolia testnet configuration
 [rpc_endpoints]
 base_sepolia = "https://sepolia.base.org"
+lisk_sepolia = "https://rpc.sepolia-api.lisk.com"
+# celo_sepolia = "https://celo-sepolia.drpc.org"
+celo_sepolia = "https://forno.celo-sepolia.celo-testnet.org"
 
 [etherscan]
 base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api.etherscan.io/v2/api" }
-
+lisk_sepolia = { key = "${LISKSCAN_API_KEY}", url = "https://api.etherscan.io/v2/api" }
+celo_sepolia = { key = "${CELOSCAN_API_KEY}", url = "https://api.etherscan.io/v2/api" }    
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
