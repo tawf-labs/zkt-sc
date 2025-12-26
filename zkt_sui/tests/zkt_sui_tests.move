@@ -1,8 +1,7 @@
-/*
 #[test_only]
 module zkt_sui::zkt_sui_tests;
 // uncomment this line to import the module
-// use zkt_sui::zkt_sui;
+use zkt_sui::zkt_sui;
 
 const ENotImplemented: u64 = 0;
 
@@ -15,4 +14,5 @@ fun test_zkt_sui() {
 fun test_zkt_sui_fail() {
     abort ENotImplemented
 }
-*/
+
+

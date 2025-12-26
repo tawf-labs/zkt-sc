@@ -33,4 +33,5 @@ zkt_sui = "0x0"
 # The dev-addresses section allows overwriting named addresses for the `--test`
 # and `--dev` modes.
 # alice = "0xB0B"
+zidan = "0x5b808ece975079413ed32dd1f045563dae406492d95f099056cd4af85e9f9cca"
 
