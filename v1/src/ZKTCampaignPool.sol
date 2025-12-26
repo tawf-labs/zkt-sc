@@ -10,6 +10,21 @@ interface IERC20 {
     function transfer(address to, uint256 amount) external returns (bool);
 }
 
+interface IZKTReceiptNFT {
+    function mint(
+        address to,
+        bytes32 campaignId,
+        uint256 amount,
+        string calldata ipfsCID,
+        bool isImpact
+    ) external returns (uint256 tokenId);
+    
+    function updateIPFSCID(
+        uint256 tokenId,
+        string calldata newCID
+    ) external;
+}
+
 /*//////////////////////////////////////////////////////////////
                         CORE CONTRACT
 //////////////////////////////////////////////////////////////*/
@@ -17,18 +32,22 @@ interface IERC20 {
 contract ZKTCampaignPool {
     address public admin;        // multisig
     IERC20  public immutable token;        // e.g. USDC
+    IZKTReceiptNFT public immutable receiptNFT;  // Donation receipt NFT
 
     bool public paused;
 
     constructor(
         address _admin,
-        address _token
+        address _token,
+        address _receiptNFT
     ) {
         require(_admin != address(0), "admin zero");
         require(_token != address(0), "token zero");
+        require(_receiptNFT != address(0), "nft zero");
 
         admin = _admin;
         token = IERC20(_token);
+        receiptNFT = IZKTReceiptNFT(_receiptNFT);
     }
 
     modifier onlyAdmin() {
@@ -152,7 +171,12 @@ contract ZKTCampaignPool {
                                 DONATE
     //////////////////////////////////////////////////////////////*/
 
-    event Donated(bytes32 indexed campaignId, address indexed donor, uint256 amount);
+    event Donated(
+        bytes32 indexed campaignId,
+        address indexed donor,
+        uint256 amount,
+        uint256 indexed tokenId
+    );
 
     function donate(
         bytes32 campaignId,
@@ -174,7 +198,16 @@ contract ZKTCampaignPool {
 
         c.totalRaised += amount;
 
-        emit Donated(campaignId, msg.sender, amount);
+        // Mint receipt NFT to donor (admin will update CID via Pinata later)
+        uint256 tokenId = receiptNFT.mint(
+            msg.sender,
+            campaignId,
+            amount,
+            "",  // Empty CID initially - admin updates after uploading to Pinata
+            false  // isImpact = false (this is donation, not disbursement)
+        );
+
+        emit Donated(campaignId, msg.sender, amount, tokenId);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -231,5 +264,33 @@ contract ZKTCampaignPool {
     function unpause() external onlyAdmin {
         paused = false;
         emit Unpaused();
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        NFT METADATA UPDATE
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Admin function to update IPFS CID for receipt NFTs
+    /// @dev Called after NGO uploads reports/images to Pinata
+    /// @param tokenId The NFT token ID to update
+    /// @param pinataCID The Pinata folder CID containing reports and images
+    function updateReceiptMetadata(
+        uint256 tokenId,
+        string calldata pinataCID
+    ) external onlyAdmin {
+        receiptNFT.updateIPFSCID(tokenId, pinataCID);
+    }
+
+    /// @notice Batch update IPFS CID for multiple receipt NFTs
+    /// @dev Useful for updating all receipts in a campaign at once
+    /// @param tokenIds Array of NFT token IDs to update
+    /// @param pinataCID The Pinata folder CID containing reports and images
+    function batchUpdateReceiptMetadata(
+        uint256[] calldata tokenIds,
+        string calldata pinataCID
+    ) external onlyAdmin {
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            receiptNFT.updateIPFSCID(tokenIds[i], pinataCID);
+        }
     }
 }

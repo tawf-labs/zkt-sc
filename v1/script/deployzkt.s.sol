@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Script.sol";
 import "../src/TestUSDC.sol";
 import "../src/ZKTCampaignPool.sol";
+import "../src/ZKTReceiptNFT.sol";
 
 contract Deploy is Script {
     function run() external {
@@ -17,14 +18,23 @@ contract Deploy is Script {
         TestUSDC usdc = new TestUSDC(1_000_000_000_000);
         console.log("USDC:", address(usdc));
 
-        // 2. Deploy campaign pool (escrow) - deployer is initial admin
+        // 2. Deploy receipt NFT with zero address (no minter yet)
+        ZKTReceiptNFT receiptNFT = new ZKTReceiptNFT(address(0));
+        console.log("Receipt NFT:", address(receiptNFT));
+
+        // 3. Deploy campaign pool (escrow) - deployer is initial admin
         ZKTCampaignPool pool = new ZKTCampaignPool(
             deployer,
-            address(usdc)
+            address(usdc),
+            address(receiptNFT)
         );
         console.log("Pool:", address(pool));
 
-        // 3. Create test campaign
+        // 4. Set pool as the NFT minter
+        receiptNFT.setMinter(address(pool));
+        console.log("Pool set as NFT minter");
+
+        // 5. Create test campaign
         bytes32 testCampaign = keccak256("RAMADAN-2025-TEST");
         pool.createCampaign(
             testCampaign,
@@ -33,19 +43,19 @@ contract Deploy is Script {
         );
         console.log("Campaign created: RAMADAN-2025-TEST");
 
-        // 4. Approve test NGO
+        // 6. Approve test NGO
         bytes32 testNGO = keccak256("TELAGA-TEST");
         address testNGOWallet = 0x2ca80Cc5e254C45E99281F670d694B22E6a90FC4; // Replace with your test wallet
         pool.approveNGO(testNGO, testNGOWallet);
         console.log("NGO approved: TELAGA-TEST");
         console.log("NGO wallet:", testNGOWallet);
 
-        // 5. Set allocation (100% to test NGO)
+        // 7. Set allocation (100% to test NGO)
         pool.setAllocation(testCampaign, testNGO, 10_000);
         pool.lockAllocation(testCampaign);
         console.log("Allocation locked: 100% to TELAGA-TEST");
 
-        // 6. Transfer admin rights to multisig
+        // 8. Transfer admin rights to multisig
         pool.transferAdmin(adminMultisig);
         console.log("Admin transferred to:", adminMultisig);
 

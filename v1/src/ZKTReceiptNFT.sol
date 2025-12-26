@@ -34,6 +34,12 @@ contract ZKTReceiptNFT {
         string ipfsCID
     );
 
+    event IPFSCIDUpdated(
+        uint256 indexed tokenId,
+        string oldCID,
+        string newCID
+    );
+
     constructor(address _minter) {
         minter = _minter;
     }
@@ -95,7 +101,6 @@ contract ZKTReceiptNFT {
         bool isImpact
     ) external onlyMinter returns (uint256 tokenId) {
         require(to != address(0), "to zero");
-        require(bytes(ipfsCID).length > 0, "empty CID");
 
         tokenId = ++totalSupply;
 
@@ -118,5 +123,25 @@ contract ZKTReceiptNFT {
             isImpact,
             ipfsCID
         );
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        ADMIN UPDATE METADATA
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Allows minter (admin) to update IPFS CID after minting
+    /// @dev Used when NGO uploads report, images, etc. to Pinata folder
+    function updateIPFSCID(
+        uint256 tokenId,
+        string calldata newCID
+    ) external onlyMinter {
+        require(_ownerOf[tokenId] != address(0), "nonexistent token");
+        require(bytes(newCID).length > 0, "empty CID");
+
+        string memory oldCID = receipts[tokenId].ipfsCID;
+        receipts[tokenId].ipfsCID = newCID;
+        receipts[tokenId].cidHash = keccak256(bytes(newCID));
+
+        emit IPFSCIDUpdated(tokenId, oldCID, newCID);
     }
 }
