@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.33;
 
 import "forge-std/Test.sol";
 import "../src/tokens/MockIDRX.sol";
@@ -271,31 +271,58 @@ contract ZKTCoreTest is Test {
         uint256 poolId = dao.createCampaignPool(proposalId);
         assertEq(poolId, 1);
         
-        // Donor1 donates (first donation)
+        // Donor1 donates (first donation) with IPFS CID from Pinata
         vm.startPrank(donor1);
         idrxToken.approve(address(dao.getPoolManagerAddress()), 500 * 10**18);
-        dao.donate(poolId, 500 * 10**18);
+        dao.donate(poolId, 500 * 10**18, "QmX1Y2Z3ReceiptMetadata1");
         vm.stopPrank();
         
-        // Check first receipt NFT minted
+        // Check first receipt NFT minted with IPFS metadata
         uint256[] memory donor1Receipts = receiptNFT.getDonorReceipts(donor1);
         assertEq(donor1Receipts.length, 1);
         assertEq(receiptNFT.ownerOf(donor1Receipts[0]), donor1);
         
-        // Donor1 donates again (should mint ANOTHER receipt NFT)
+        // Verify IPFS URI is set correctly
+        uint256 firstTokenId = donor1Receipts[0];
+        string memory tokenURI = receiptNFT.tokenURI(firstTokenId);
+        assertEq(tokenURI, "ipfs://QmX1Y2Z3ReceiptMetadata1");
+        
+        // Verify metadata stored correctly
+        (
+            uint256 poolId_,
+            address donor_,
+            uint256 amount_,
+            uint256 donatedAt_,
+            string memory title_,
+            string memory type_,
+            string memory ipfsCID_,
+            bool isActive_
+        ) = receiptNFT.tokenMetadata(firstTokenId);
+        assertEq(poolId_, poolId);
+        assertEq(donor_, donor1);
+        assertEq(amount_, 500 * 10**18);
+        assertEq(ipfsCID_, "QmX1Y2Z3ReceiptMetadata1");
+        assertTrue(isActive_);
+        
+        // Donor1 donates again (should mint ANOTHER receipt NFT with different IPFS CID)
         vm.startPrank(donor1);
         idrxToken.approve(address(dao.getPoolManagerAddress()), 300 * 10**18);
-        dao.donate(poolId, 300 * 10**18);
+        dao.donate(poolId, 300 * 10**18, "QmA2B3C4ReceiptMetadata2");
         vm.stopPrank();
         
         // Check second receipt NFT minted for same donor
         donor1Receipts = receiptNFT.getDonorReceipts(donor1);
         assertEq(donor1Receipts.length, 2); // Now has 2 receipt NFTs
         
-        // Donor2 donates
+        // Verify second NFT has different IPFS CID
+        uint256 secondTokenId = donor1Receipts[1];
+        string memory tokenURI2 = receiptNFT.tokenURI(secondTokenId);
+        assertEq(tokenURI2, "ipfs://QmA2B3C4ReceiptMetadata2");
+        
+        // Donor2 donates with their own IPFS CID
         vm.startPrank(donor2);
         idrxToken.approve(address(dao.getPoolManagerAddress()), 600 * 10**18);
-        dao.donate(poolId, 600 * 10**18);
+        dao.donate(poolId, 600 * 10**18, "QmD5E6F7ReceiptMetadata3");
         vm.stopPrank();
         
         // Check donor2 has 1 receipt NFT
@@ -375,7 +402,7 @@ contract ZKTCoreTest is Test {
         
         vm.startPrank(donor1);
         idrxToken.approve(address(dao.getPoolManagerAddress()), 100 * 10**18);
-        dao.donate(poolId, 100 * 10**18);
+        dao.donate(poolId, 100 * 10**18, "QmTestNonTransferable");
         vm.stopPrank();
         
         uint256[] memory receipts = receiptNFT.getDonorReceipts(donor1);
@@ -386,4 +413,77 @@ contract ZKTCoreTest is Test {
         vm.expectRevert("DonationReceiptNFT: Non-transferable receipt");
         receiptNFT.transferFrom(donor1, donor2, tokenId);
     }
+    
+    function testIPFSReceiptMetadata() public {
+        // Setup approved proposal and pool
+        vm.prank(organizer);
+        uint256 proposalId = dao.createProposal(
+            "Disaster Relief Campaign",
+            "Emergency assistance",
+            2000 * 10**18,
+            true,
+            bytes32(0),
+            new string[](0)
+        );
+        
+        vm.prank(organizer);
+        dao.submitForCommunityVote(proposalId);
+        vm.prank(member1);
+        dao.castVote(proposalId, 1);
+        vm.prank(member2);
+        dao.castVote(proposalId, 1);
+        
+        vm.warp(block.timestamp + 8 days);
+        dao.finalizeCommunityVote(proposalId);
+        
+        uint256 bundleId = 1;
+        vm.prank(shariaCouncil1);
+        dao.reviewProposal(bundleId, proposalId, true, IProposalManager.CampaignType.ZakatCompliant, bytes32(0));
+        vm.prank(shariaCouncil1);
+        dao.finalizeShariaBundle(bundleId);
+        
+        vm.prank(organizer);
+        uint256 poolId = dao.createCampaignPool(proposalId);
+        
+        // Simulate Pinata IPFS upload: Frontend uploads metadata to Pinata and gets CID
+        // Metadata JSON contains: campaign reports, images, donation details, etc.
+        string memory pinataIPFSCID = "QmPinataExampleCID123WithFullMetadata";
+        
+        // Donor donates and passes IPFS CID
+        vm.startPrank(donor1);
+        idrxToken.approve(address(dao.getPoolManagerAddress()), 500 * 10**18);
+        dao.donate(poolId, 500 * 10**18, pinataIPFSCID);
+        vm.stopPrank();
+        
+        // Verify NFT was minted with IPFS metadata
+        uint256[] memory receipts = receiptNFT.getDonorReceipts(donor1);
+        assertEq(receipts.length, 1);
+        
+        uint256 tokenId = receipts[0];
+        
+        // Check tokenURI points to IPFS
+        string memory tokenURI = receiptNFT.tokenURI(tokenId);
+        assertEq(tokenURI, "ipfs://QmPinataExampleCID123WithFullMetadata");
+        
+        // Verify metadata struct contains IPFS CID
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            string memory storedIPFSCID,
+            
+        ) = receiptNFT.tokenMetadata(tokenId);
+        assertEq(storedIPFSCID, pinataIPFSCID);
+        
+        // Test that donation without IPFS CID fails
+        vm.startPrank(donor2);
+        idrxToken.approve(address(dao.getPoolManagerAddress()), 300 * 10**18);
+        vm.expectRevert("IPFS CID required");
+        dao.donate(poolId, 300 * 10**18, ""); // Empty CID should fail
+        vm.stopPrank();
+    }
 }
+

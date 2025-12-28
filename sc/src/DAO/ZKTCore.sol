@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.33;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "./core/ProposalManager.sol";
@@ -166,8 +166,8 @@ contract ZKTCore is AccessControl {
         return poolManager.createCampaignPool(proposalId);
     }
     
-    function donate(uint256 poolId, uint256 amount) external {
-        poolManager.donate(msg.sender, poolId, amount);
+    function donate(uint256 poolId, uint256 amount, string memory ipfsCID) external {
+        poolManager.donate(msg.sender, poolId, amount, ipfsCID);
     }
     
     function withdrawFunds(uint256 poolId) external {

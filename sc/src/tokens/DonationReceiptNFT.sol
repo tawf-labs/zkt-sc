@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.33;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
@@ -28,6 +28,7 @@ contract DonationReceiptNFT is ERC721URIStorage, AccessControl {
         uint256 donatedAt;
         string campaignTitle;
         string campaignType; // "Zakat" or "Normal"
+        string ipfsCID; // IPFS CID for full receipt metadata (reports, images, etc.)
         bool isActive;
     }
     
@@ -58,6 +59,7 @@ contract DonationReceiptNFT is ERC721URIStorage, AccessControl {
      * @param amount Donation amount
      * @param campaignTitle Campaign name
      * @param campaignType "Zakat" or "Normal"
+     * @param ipfsCID IPFS CID containing full receipt metadata (uploaded via Pinata)
      * @return tokenId The minted token ID
      */
     function mint(
@@ -65,7 +67,8 @@ contract DonationReceiptNFT is ERC721URIStorage, AccessControl {
         uint256 poolId,
         uint256 amount,
         string memory campaignTitle,
-        string memory campaignType
+        string memory campaignType,
+        string memory ipfsCID
     ) external onlyRole(MINTER_ROLE) returns (uint256) {
         require(to != address(0), "DonationReceiptNFT: Cannot mint to zero address");
         require(amount > 0, "DonationReceiptNFT: Amount must be greater than 0");
@@ -83,15 +86,18 @@ contract DonationReceiptNFT is ERC721URIStorage, AccessControl {
             donatedAt: block.timestamp,
             campaignTitle: campaignTitle,
             campaignType: campaignType,
+            ipfsCID: ipfsCID,
             isActive: true
         });
         
         // Track donor's receipts
         donorTokens[to].push(tokenId);
         
-        // Generate and set token URI
-        string memory uri = _generateTokenURI(tokenId);
-        _setTokenURI(tokenId, uri);
+        // Set token URI to IPFS (Pinata-hosted metadata)
+        if (bytes(ipfsCID).length > 0) {
+            string memory uri = string(abi.encodePacked("ipfs://", ipfsCID));
+            _setTokenURI(tokenId, uri);
+        }
         
         emit SBTMinted(tokenId, to, poolId, amount, campaignType);
         
@@ -115,7 +121,8 @@ contract DonationReceiptNFT is ERC721URIStorage, AccessControl {
     }
     
     /**
-     * @notice Generate on-chain JSON metadata for donation receipt
+     * @notice Generate on-chain JSON metadata for donation receipt (DEPRECATED: Use IPFS)
+     * @dev Kept for fallback if IPFS CID is not provided
      * @param tokenId Token ID
      * @return Base64-encoded JSON metadata URI
      */

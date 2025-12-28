@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.33;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -103,11 +103,12 @@ contract PoolManager is AccessControl, ReentrancyGuard {
         return poolId;
     }
     
-    function donate(address donor, uint256 poolId, uint256 amount) external nonReentrant {
+    function donate(address donor, uint256 poolId, uint256 amount, string memory ipfsCID) external nonReentrant {
         CampaignPool storage pool = campaignPools[poolId];
         
         require(pool.isActive, "Pool not active");
         require(amount > 0, "Amount must be > 0");
+        require(bytes(ipfsCID).length > 0, "IPFS CID required");
         
         require(
             idrxToken.transferFrom(donor, address(this), amount),
@@ -124,10 +125,11 @@ contract PoolManager is AccessControl, ReentrancyGuard {
         pool.raisedAmount += amount;
         
         // Mint new NFT receipt for EVERY donation (one receipt per donation)
+        // IPFS CID contains full metadata: campaign reports, images, donation proof, etc.
         string memory campaignTypeStr = pool.campaignType == IProposalManager.CampaignType.ZakatCompliant 
             ? "Zakat" 
             : "Normal";
-        uint256 receiptTokenId = receiptNFT.mint(donor, poolId, amount, pool.campaignTitle, campaignTypeStr);
+        uint256 receiptTokenId = receiptNFT.mint(donor, poolId, amount, pool.campaignTitle, campaignTypeStr, ipfsCID);
         
         emit DonationReceived(poolId, donor, amount, receiptTokenId);
         
