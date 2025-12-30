@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.33;
-
+pragma solidity ^0.8.31;
 /// @title Test USDC (6 decimals)
 contract TestUSDC {
     string public name = "Test USDC";

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.33;
-
+pragma solidity ^0.8.31;
 /// @title ZKT Receipt NFT (Soulbound + IPFS)
 /// @notice Non-transferable NFT for donation & impact receipts
 

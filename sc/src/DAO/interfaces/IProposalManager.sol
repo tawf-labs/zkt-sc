@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.33;
-
+pragma solidity ^0.8.31;
 /**
  * @title IProposalManager
  * @notice Interface for proposal creation and KYC management
