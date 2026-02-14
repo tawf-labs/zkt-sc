@@ -11,7 +11,7 @@ contract Deploy is Script {
         address deployer = vm.addr(deployerPrivateKey);
         address adminMultisig = vm.envAddress("ADMIN_MULTISIG");
 
-        vm.startBroadcast();
+        vm.startBroadcast(deployerPrivateKey);
 
         // 1. Deploy test USDC
         TestUSDC usdc = new TestUSDC(1_000_000_000_000);

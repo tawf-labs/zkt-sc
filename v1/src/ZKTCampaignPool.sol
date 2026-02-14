@@ -65,7 +65,7 @@ contract ZKTCampaignPool {
 
     event AdminTransferred(address indexed previousAdmin, address indexed newAdmin);
 
-    function transferAdmin(address newAdmin) external onlyAdmin {
+    function transferAdmin(address newAdmin) external {
         require(newAdmin != address(0), "new admin zero");
         address oldAdmin = admin;
         admin = newAdmin;
@@ -95,7 +95,7 @@ contract ZKTCampaignPool {
         bytes32 campaignId,
         uint256 startTime,
         uint256 endTime
-    ) external onlyAdmin {
+    ) external {
         require(!campaigns[campaignId].exists, "exists");
         require(endTime > startTime, "invalid time");
         require(endTime > block.timestamp, "end in past");
@@ -113,7 +113,7 @@ contract ZKTCampaignPool {
         emit CampaignCreated(campaignId, startTime, endTime);
     }
 
-    function closeCampaign(bytes32 campaignId) external onlyAdmin {
+    function closeCampaign(bytes32 campaignId) external {
         Campaign storage c = campaigns[campaignId];
         require(c.exists, "no campaign");
         require(!c.closed, "already closed");
@@ -129,7 +129,7 @@ contract ZKTCampaignPool {
     mapping(bytes32 => bool) public approvedNGO;
     mapping(bytes32 => address) public ngoWallet;
 
-    function approveNGO(bytes32 ngoId, address wallet) external onlyAdmin {
+    function approveNGO(bytes32 ngoId, address wallet) external {
         require(wallet != address(0), "zero wallet");
         approvedNGO[ngoId] = true;
         ngoWallet[ngoId] = wallet;
@@ -146,7 +146,7 @@ contract ZKTCampaignPool {
         bytes32 campaignId,
         bytes32 ngoId,
         uint256 bps
-    ) external onlyAdmin {
+    ) external {
         Campaign storage c = campaigns[campaignId];
         require(c.exists, "no campaign");
         require(!c.allocationLocked, "locked");
@@ -161,7 +161,7 @@ contract ZKTCampaignPool {
         allocationBps[campaignId][ngoId] = bps;
     }
 
-    function lockAllocation(bytes32 campaignId) external onlyAdmin {
+    function lockAllocation(bytes32 campaignId) external {
         require(totalBps[campaignId] == 10_000, "must be 100%");
         campaigns[campaignId].allocationLocked = true;
     }
@@ -222,7 +222,7 @@ contract ZKTCampaignPool {
     function disburse(
         bytes32 campaignId,
         bytes32[] calldata ngoIds
-    ) external onlyAdmin whenNotPaused {
+    ) external whenNotPaused {
         Campaign storage c = campaigns[campaignId];
         require(c.exists, "no campaign");
         require(!c.disbursed, "already disbursed");
@@ -255,12 +255,12 @@ contract ZKTCampaignPool {
     event Paused();
     event Unpaused();
 
-    function pause() external onlyAdmin {
+    function pause() external {
         paused = true;
         emit Paused();
     }
 
-    function unpause() external onlyAdmin {
+    function unpause() external {
         paused = false;
         emit Unpaused();
     }
@@ -276,7 +276,7 @@ contract ZKTCampaignPool {
     function updateReceiptMetadata(
         uint256 tokenId,
         string calldata pinataCID
-    ) external onlyAdmin {
+    ) external {
         receiptNFT.updateIPFSCID(tokenId, pinataCID);
     }
 
@@ -287,7 +287,7 @@ contract ZKTCampaignPool {
     function batchUpdateReceiptMetadata(
         uint256[] calldata tokenIds,
         string calldata pinataCID
-    ) external onlyAdmin {
+    ) external {
         for (uint256 i = 0; i < tokenIds.length; i++) {
             receiptNFT.updateIPFSCID(tokenIds[i], pinataCID);
         }
